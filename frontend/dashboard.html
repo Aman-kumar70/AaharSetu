@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Standalone CDN fallback for browser preview -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<div class="max-w-xl mx-auto space-y-6">
+
+  <!-- PAGE HEADER -->
+  <div class="text-center">
+    <div
+      class="inline-flex items-center justify-center w-12 h-12 bg-green-100 text-green-700 rounded-full mb-2 text-2xl">
+      🌱
+    </div>
+    <h1 class="text-2xl font-bold text-gray-800">Community Impact Dashboard</h1>
+    <p class="text-xs text-gray-500 mt-1">Real-time metrics on food waste prevented & hunger relieved</p>
+  </div>
+
+  <!-- THREE BIG NUMBER CARDS -->
+  <div class="grid grid-cols-3 gap-3">
+
+    <!-- Stat 1: Meals Saved -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-3 text-center">
+      <div class="text-green-600 text-lg mb-1">🍽️</div>
+      <p id="stat-meals" class="text-2xl font-extrabold text-gray-900">
+        {{ stats.meals_saved if stats else 120 }}
+      </p>
+      <p class="text-2xs uppercase tracking-wide font-semibold text-gray-500 mt-1">
+        Meals Saved
+      </p>
+    </div>
+
+    <!-- Stat 2: Total Kg Rescued -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-3 text-center">
+      <div class="text-blue-600 text-lg mb-1">⚖️</div>
+      <p id="stat-kg" class="text-2xl font-extrabold text-gray-900">
+        {{ stats.total_kg if stats else 60 }} <span class="text-xs font-medium text-gray-500">kg</span>
+      </p>
+      <p class="text-2xs uppercase tracking-wide font-semibold text-gray-500 mt-1">
+        Food Rescued
+      </p>
+    </div>
+
+    <!-- Stat 3: Total Rescues Completed -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-3 text-center">
+      <div class="text-purple-600 text-lg mb-1">🚚</div>
+      <p id="stat-donations" class="text-2xl font-extrabold text-gray-900">
+        {{ stats.donations if stats else 5 }}
+      </p>
+      <p class="text-2xs uppercase tracking-wide font-semibold text-gray-500 mt-1">
+        Donations
+      </p>
+    </div>
+
+  </div>
+
+  <!-- RECENT RESCUES TABLE SECTION -->
+  <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+    <div class="flex items-center justify-between border-b pb-3 mb-3">
+      <h2 class="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+        <span>🕒</span> Recent Verified Rescues
+      </h2>
+      <span class="text-2xs text-gray-400">Refreshes every 10s</span>
+    </div>
+
+    <!-- Table Container -->
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs">
+        <thead class="bg-gray-50 text-gray-600 uppercase text-2xs border-b">
+          <tr>
+            <th class="py-2 px-2.5"># ID</th>
+            <th class="py-2 px-2.5">Food Type</th>
+            <th class="py-2 px-2.5">Quantity</th>
+            <th class="py-2 px-2.5">Partner NGO</th>
+            <th class="py-2 px-2.5 text-right">Time</th>
+          </tr>
+        </thead>
+        <tbody id="recent-table-body" class="divide-y divide-gray-100 text-gray-700">
+          {% if stats and stats.recent %}
+          {% for r in stats.recent %}
+          <tr class="hover:bg-gray-50">
+            <td class="py-2 px-2.5 font-mono text-gray-500">#{{ r.id }}</td>
+            <td class="py-2 px-2.5 font-medium text-gray-900">{{ r.food_type }}</td>
+            <td class="py-2 px-2.5 font-semibold text-green-700">{{ r.kg }} kg</td>
+            <td class="py-2 px-2.5">{{ r.ngo }}</td>
+            <td class="py-2 px-2.5 text-right text-gray-400">{{ r.time }}</td>
+          </tr>
+          {% endfor %}
+          {% else %}
+          <!-- Realistic Dummy Rows for Direct Preview and Demo Presentations -->
+          <tr class="hover:bg-gray-50">
+            <td class="py-2.5 px-2.5 font-mono text-gray-500">#103</td>
+            <td class="py-2.5 px-2.5 font-semibold text-gray-900">Cooked Rice & Dal</td>
+            <td class="py-2.5 px-2.5 font-bold text-green-700">30 kg</td>
+            <td class="py-2.5 px-2.5">Robin Hood Army</td>
+            <td class="py-2.5 px-2.5 text-right text-gray-400">10m ago</td>
+          </tr>
+          <tr class="hover:bg-gray-50">
+            <td class="py-2.5 px-2.5 font-mono text-gray-500">#102</td>
+            <td class="py-2.5 px-2.5 font-semibold text-gray-900">Roti & Paneer Sabzi</td>
+            <td class="py-2.5 px-2.5 font-bold text-green-700">15 kg</td>
+            <td class="py-2.5 px-2.5">City Shelter</td>
+            <td class="py-2.5 px-2.5 text-right text-gray-400">1h ago</td>
+          </tr>
+          <tr class="hover:bg-gray-50">
+            <td class="py-2.5 px-2.5 font-mono text-gray-500">#101</td>
+            <td class="py-2.5 px-2.5 font-semibold text-gray-900">Sandwiches & Snacks</td>
+            <td class="py-2.5 px-2.5 font-bold text-green-700">10 kg</td>
+            <td class="py-2.5 px-2.5">Sanjhi Rasoi</td>
+            <td class="py-2.5 px-2.5 text-right text-gray-400">3h ago</td>
+          </tr>
+          <tr class="hover:bg-gray-50">
+            <td class="py-2.5 px-2.5 font-mono text-gray-500">#100</td>
+            <td class="py-2.5 px-2.5 font-semibold text-gray-900">Fresh Bread & Milk</td>
+            <td class="py-2.5 px-2.5 font-bold text-green-700">5 kg</td>
+            <td class="py-2.5 px-2.5">Robin Hood Army</td>
+            <td class="py-2.5 px-2.5 text-right text-gray-400">Yesterday</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- CARBON / ENVIRONMENTAL BENEFIT CARD -->
+  <div class="bg-green-50 border border-green-200 rounded-lg p-3.5 text-xs text-green-800 flex items-center gap-3">
+    <span class="text-2xl">🌍</span>
+    <div>
+      <span class="font-bold">Eco Impact:</span> Every 1 kg of cooked food rescued prevents approximately 2.5 kg of
+      greenhouse gas (CO₂e) emissions from landfills.
+    </div>
+  </div>
+
+</div>
+
+<!-- Vanilla JS: Refreshes dashboard statistics from /api/stats every 10 seconds -->
+<script>
+  function fetchDashboardStats() {
+    fetch('/api/stats')
+      .then(function (response) {
+        if (!response.ok) throw new Error('API error');
+        return response.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+
+        // Update big stat numbers
+        if (data.meals_saved !== undefined) {
+          document.getElementById('stat-meals').textContent = data.meals_saved;
+        }
+        if (data.total_kg !== undefined) {
+          document.getElementById('stat-kg').innerHTML = data.total_kg + ' <span class="text-xs font-medium text-gray-500">kg</span>';
+        }
+        if (data.donations !== undefined) {
+          document.getElementById('stat-donations').textContent = data.donations;
+        }
+
+        // Update recent rescues table if recent array is returned
+        if (Array.isArray(data.recent) && data.recent.length > 0) {
+          var tbody = document.getElementById('recent-table-body');
+          tbody.innerHTML = '';
+          data.recent.forEach(function (row) {
+            var tr = document.createElement('tr');
+            tr.className = 'hover:bg-gray-50';
+            tr.innerHTML =
+              '<td class="py-2.5 px-2.5 font-mono text-gray-500">#' + row.id + '</td>' +
+              '<td class="py-2.5 px-2.5 font-semibold text-gray-900">' + row.food_type + '</td>' +
+              '<td class="py-2.5 px-2.5 font-bold text-green-700">' + row.kg + ' kg</td>' +
+              '<td class="py-2.5 px-2.5">' + row.ngo + '</td>' +
+              '<td class="py-2.5 px-2.5 text-right text-gray-400">' + row.time + '</td>';
+            tbody.appendChild(tr);
+          });
+        }
+      })
+      .catch(function () {
+        // Silently keep current dummy data if backend is offline
+      });
+  }
+
+  // Poll every 10 seconds (10000 ms) as specified in contract
+  document.addEventListener('DOMContentLoaded', function () {
+    setInterval(fetchDashboardStats, 10000);
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Direct CDN fallback so this template looks styled even if opened directly in browser preview -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<div class="max-w-xl mx-auto">
+  <!-- Main Login Card -->
+  <div class="bg-white rounded-lg shadow-md p-6 mb-4 border border-gray-100">
+    <!-- Header & Subtitle -->
+    <div class="mb-6 text-center">
+      <div
+        class="inline-flex items-center justify-center w-12 h-12 bg-green-100 text-green-700 rounded-full mb-3 text-2xl">
+        🍲
+      </div>
+      <h1 class="text-2xl font-bold text-gray-800">Welcome Back</h1>
+      <p class="text-sm text-gray-500 mt-1">Surplus Food Rescue & Redistribution System</p>
+    </div>
+
+    <!-- Login Form: Submits to POST /login as per contract -->
+    <form id="login-form" action="/login" method="POST" class="space-y-4">
+      <!-- Username Field -->
+      <div>
+        <label for="name" class="block text-sm font-semibold text-gray-700 mb-1">
+          Name / Organization
+        </label>
+        <input type="text" id="name" name="name" required value="Green Valley Hostel"
+          placeholder="Enter your name or organization"
+          class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-800 text-sm">
+      </div>
+
+      <!-- Password Field -->
+      <div>
+        <label for="password" class="block text-sm font-semibold text-gray-700 mb-1">
+          Password
+        </label>
+        <input type="password" id="password" name="password" required value="password123" placeholder="Enter password"
+          class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-800 text-sm">
+      </div>
+
+      <!-- Role Selection Dropdown (exact roles: donor, ngo, volunteer) -->
+      <div>
+        <label for="role" class="block text-sm font-semibold text-gray-700 mb-1">
+          Select Role
+        </label>
+        <select id="role" name="role" required
+          class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500 bg-white text-gray-800 text-sm">
+          <option value="donor" selected>Donor (Hostel / Canteen / Restaurant)</option>
+          <option value="ngo">NGO / Shelter (Food Recipient)</option>
+          <option value="volunteer">Volunteer (Pickup & Delivery)</option>
+        </select>
+      </div>
+
+      <!-- Primary Action Button -->
+      <button type="submit"
+        class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2.5 rounded transition shadow">
+        Sign In & Go to Dashboard
+      </button>
+    </form>
+  </div>
+
+  <!-- Quick Demo Account Fillers (Frontend-only helper with dummy data for judge testing) -->
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
+    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 text-center">
+      ⚡ One-Click Demo Accounts (Click to test different roles)
+    </p>
+    <div class="grid grid-cols-3 gap-2">
+      <!-- Preset 1: Donor -->
+      <button type="button" onclick="fillDemo('Green Valley Hostel', 'donor')"
+        class="text-xs bg-gray-50 border border-gray-300 hover:bg-green-50 hover:border-green-400 py-2 px-2 rounded text-gray-700 font-medium text-center transition">
+        Hostel (Donor)
+      </button>
+
+      <!-- Preset 2: NGO -->
+      <button type="button" onclick="fillDemo('Robin Hood Army', 'ngo')"
+        class="text-xs bg-gray-50 border border-gray-300 hover:bg-green-50 hover:border-green-400 py-2 px-2 rounded text-gray-700 font-medium text-center transition">
+        Shelter (NGO)
+      </button>
+
+      <!-- Preset 3: Volunteer -->
+      <button type="button" onclick="fillDemo('Aman Sharma', 'volunteer')"
+        class="text-xs bg-gray-50 border border-gray-300 hover:bg-green-50 hover:border-green-400 py-2 px-2 rounded text-gray-700 font-medium text-center transition">
+        Aman (Volunteer)
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Helper script for both demo testing and Flask backend -->
+<script>
+  function fillDemo(name, role) {
+    document.getElementById('name').value = name;
+    document.getElementById('password').value = 'demo123';
+    document.getElementById('role').value = role;
+  }
+
+  // If running standalone (file://), connect form directly to the target role page!
+  document.getElementById('login-form').addEventListener('submit', function (e) {
+    if (window.location.protocol === 'file:') {
+      e.preventDefault();
+      const selectedRole = document.getElementById('role').value;
+      if (selectedRole === 'donor') window.location.href = 'donor.html';
+      else if (selectedRole === 'ngo') window.location.href = 'ngo.html';
+      else if (selectedRole === 'volunteer') window.location.href = 'volunteer.html';
+    }
+  });
+</script>
+{% endblock %}
