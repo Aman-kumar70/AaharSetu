@@ -33,6 +33,33 @@ BLOCKED_TYPES = [
 ]
 
 
+def get_safe_hours(food_type):
+    """
+    Intelligently determines safe consumption hours based on exact category or keyword matching.
+    Supports manual typing of foods like 'Veg Biryani', 'Aloo Paratha', 'Dal Makhani', 'Sandwiches', etc.
+    """
+    ft = food_type.strip().lower()
+
+    # 1. Exact match check
+    for k, v in SAFE_HOURS.items():
+        if k.lower() == ft:
+            return v
+
+    # 2. Keyword category matching
+    if any(w in ft for w in ["bread", "bakery", "biscuit", "toast", "puff", "snack", "sandwich", "burger"]):
+        return 12
+    if any(w in ft for w in ["dessert", "sweet", "mithai", "halwa", "gulab jamun", "cake", "kheer", "pastry"]):
+        return 10
+    if any(w in ft for w in ["roti", "paratha", "chapati", "naan", "kulcha", "puri", "phulka"]):
+        return 8
+    if any(w in ft for w in ["rice", "dal", "khichdi", "biryani", "pulao", "fried rice", "chawal"]):
+        return 6
+    if any(w in ft for w in ["curry", "sabzi", "gravy", "paneer", "kofta", "mix veg", "chole", "rajma"]):
+        return 5
+
+    return 4  # Standard safe baseline for prepared foods
+
+
 def parse_datetime(dt_val):
     """
     Helper function to parse datetime from various formats:
@@ -99,7 +126,7 @@ def check_safety(food_type, cooked_at, now=None):
         return False, None, "Cooking time cannot be in the future. Please provide the actual time the food was prepared."
 
     # 3. Determine safety duration (default to 4 hours if type not specifically listed)
-    safe_duration_hours = SAFE_HOURS.get(food_type.strip(), 4)
+    safe_duration_hours = get_safe_hours(food_type)
     safe_until_dt = cooked_dt + timedelta(hours=safe_duration_hours)
     safe_until_str = format_datetime(safe_until_dt)
 

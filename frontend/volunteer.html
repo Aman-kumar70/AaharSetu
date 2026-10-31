@@ -52,6 +52,7 @@
       <span>📦</span> Assigned Tasks
     </h2>
 
+    <div id="volunteer-tasks-container" class="space-y-4">
     {% if tasks %}
     <!-- DYNAMIC JINJA LOOP -->
     {% for t in tasks %}
@@ -62,7 +63,7 @@
           <p class="text-xs text-gray-500">Weight: <span class="font-semibold text-gray-700">{{ t.quantity_kg }}
               kg</span></p>
         </div>
-        <span class="px-2.5 py-1 rounded-full text-xs font-semibold uppercase
+        <span id="status-{{ t.id }}" class="px-2.5 py-1 rounded-full text-xs font-semibold uppercase
               {% if t.status == 'assigned' %}bg-purple-100 text-purple-800
               {% elif t.status == 'picked_up' %}bg-orange-100 text-orange-800
               {% elif t.status == 'delivered' %}bg-green-100 text-green-800
@@ -182,6 +183,7 @@
       </div>
     </div>
     {% endif %}
+    </div>
   </div>
 
 </div>
@@ -189,8 +191,17 @@
 <!-- Leaflet Map Initialization Script & Demo Action Handlers -->
 <script>
   document.addEventListener('DOMContentLoaded', function () {
-    var donorCoord = [31.3125, 75.5804]; // Model Town (Pickup)
-    var ngoCoord = [31.3217, 75.5786];   // BMC Chowk (Drop-off)
+    {% if tasks and tasks|length > 0 %}
+    var donorCoord = [{{ tasks[0].lat }}, {{ tasks[0].lng }}];
+    var ngoCoord = [{{ tasks[0].ngo_lat }}, {{ tasks[0].ngo_lng }}];
+    var donorTitle = {{ (tasks[0].pickup_address ~ ' (' ~ tasks[0].food_type ~ ', ' ~ tasks[0].quantity_kg ~ ' kg)')|tojson }};
+    var ngoTitle = {{ (tasks[0].ngo_name ~ ' (Relief Destination)')|tojson }};
+    {% else %}
+    var donorCoord = [31.3125, 75.5804];
+    var ngoCoord = [31.3217, 75.5786];
+    var donorTitle = "Pickup: Green Valley Hostel (30 kg)";
+    var ngoTitle = "Destination: Robin Hood Army Shelter";
+    {% endif %}
 
     if (typeof L !== 'undefined') {
       var map = L.map('map').setView([31.3171, 75.5795], 14);
@@ -201,11 +212,11 @@
       }).addTo(map);
 
       L.marker(donorCoord).addTo(map)
-        .bindPopup("<b>Pickup: Model Town</b><br>Green Valley Hostel Mess (30 kg)")
+        .bindPopup("<b>📍 Pickup Location</b><br>" + donorTitle)
         .openPopup();
 
       L.marker(ngoCoord).addTo(map)
-        .bindPopup("<b>Destination: BMC Chowk</b><br>Robin Hood Army Shelter");
+        .bindPopup("<b>🏁 Delivery Destination</b><br>" + ngoTitle);
 
       var routeLine = L.polyline([donorCoord, ngoCoord], {
         color: '#16a34a',

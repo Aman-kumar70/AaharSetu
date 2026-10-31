@@ -5,6 +5,7 @@ Handles SQLite connection, table schema creation, and seeding demo data.
 """
 
 import sqlite3
+from datetime import datetime, timedelta
 
 # Constant database filename
 DB_NAME = "food_rescue.db"
@@ -15,12 +16,18 @@ def get_db(db_name=DB_NAME):
     Creates and returns a connection to the SQLite database.
     row_factory = sqlite3.Row allows column access by name like row['name']
     in addition to integer indices row[0].
+    Configured with a 30-second timeout, busy_timeout, and WAL mode to prevent
+    'database is locked' errors under concurrent polling and writes.
     """
-    conn = sqlite3.connect(db_name)
-    # Enable accessing columns by name in query results
+    conn = sqlite3.connect(db_name, timeout=30.0)
     conn.row_factory = sqlite3.Row
-    # Enable foreign key constraints in SQLite
+    conn.execute("PRAGMA busy_timeout = 30000;")
     conn.execute("PRAGMA foreign_keys = ON;")
+    try:
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+    except Exception:
+        pass
     return conn
 
 
@@ -124,6 +131,10 @@ def seed_data(conn=None):
     cursor.execute("DELETE FROM events;")
     cursor.execute("DELETE FROM donations;")
     cursor.execute("DELETE FROM users;")
+    try:
+        cursor.execute("DELETE FROM sqlite_sequence WHERE name IN ('users', 'donations', 'events');")
+    except Exception:
+        pass
 
     # Demo users list
     # Coordinates are sample locations in Jalandhar, Punjab (approx lat ~31.3, lng ~75.5)
@@ -163,55 +174,61 @@ def seed_data(conn=None):
 
     # Initial sample donations for hackathon demo presentation
     # Statuses: assigned (ready for volunteer OTP pickup), matched (waiting for NGO accept), delivered (rescued meals)
+    now = datetime.now()
+    t_minus_1h = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    t_plus_5h = (now + timedelta(hours=5)).strftime("%Y-%m-%d %H:%M")
+    t_pickup_start = now.strftime("%Y-%m-%d %H:%M")
+    t_pickup_end = (now + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M")
+
     demo_donations = [
         # (donor_name, food_type, quantity_kg, cooked_at, safe_until, pickup_from, pickup_to, lat, lng, status, otp, ngo_name, vol_name, created_at)
         (
             user_map.get("Green Valley Hostel"),
             "Cooked Meals (Rice & Dal)",
             30.0,
-            "2026-10-30 17:00",
-            "2026-10-30 23:30",
-            "2026-10-30 18:30",
-            "2026-10-30 21:00",
+            t_minus_1h,
+            t_plus_5h,
+            t_pickup_start,
+            t_pickup_end,
             31.3125,
             75.5804,
             "assigned",
             "4821",
             user_map.get("Robin Hood Army"),
             user_map.get("Aman Sharma"),
-            "2026-10-30 17:30"
+            t_minus_1h
         ),
         (
             user_map.get("Central Campus Canteen"),
             "Roti & Mixed Sabzi",
             15.0,
-            "2026-10-30 17:30",
-            "2026-10-30 23:30",
-            "2026-10-30 19:00",
-            "2026-10-30 21:30",
+            t_minus_1h,
+            t_plus_5h,
+            t_pickup_start,
+            t_pickup_end,
             31.3965,
             75.5370,
             "matched",
             None,
             user_map.get("Robin Hood Army"),
             None,
-            "2026-10-30 18:00"
+            t_minus_1h
         ),
         (
             user_map.get("Haveli Heritage Restaurant"),
             "Lunch Snacks & Sandwiches",
             25.0,
-            "2026-10-30 12:00",
-            "2026-10-30 22:00",
-            "2026-10-30 13:00",
-            "2026-10-30 15:00",
+            t_minus_1h,
+            t_plus_5h,
+            t_pickup_start,
+            t_pickup_end,
             31.2820,
             75.6480,
             "delivered",
             "7192",
             user_map.get("Hope Foundation Shelter"),
             user_map.get("Aman Sharma"),
-            "2026-10-30 12:30"
+            t_minus_1h
         )
     ]
 

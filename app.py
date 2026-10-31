@@ -45,6 +45,7 @@ def expire_old_donations(conn):
     Background housekeeping helper:
     Checks if active donations have passed their safe_until timestamp.
     If expired, marks status as 'expired' and logs to events.
+    Only commits if an update actually occurred to avoid unnecessary locks during polling.
     """
     now_str = get_current_time_str()
     rows = conn.execute("""
@@ -52,11 +53,14 @@ def expire_old_donations(conn):
         WHERE status NOT IN ('delivered', 'cancelled', 'expired', 'declined')
     """).fetchall()
 
+    updated = False
     for r in rows:
         if r["safe_until"] and r["safe_until"] < now_str:
             conn.execute("UPDATE donations SET status = 'expired' WHERE id = ?", (r["id"],))
             conn.execute("INSERT INTO events (donation_id, status, time) VALUES (?, 'expired', ?)", (r["id"], now_str))
-    conn.commit()
+            updated = True
+    if updated:
+        conn.commit()
 
 
 # Route to ensure static assets resolve properly even if relative path '../static/' is used
@@ -160,116 +164,145 @@ def donate():
     POST: Validates safety timer, ranks NGOs, and posts donation.
     """
     conn = db.get_db()
-    expire_old_donations(conn)
+    try:
+        expire_old_donations(conn)
 
-    if "user_id" not in session or session.get("role") != "donor":
-        # Allow demo access if user navigated directly, but encourage login
-        if "role" not in session:
-            default_donor = conn.execute("SELECT id, name FROM users WHERE role = 'donor' LIMIT 1").fetchone()
-            if default_donor:
-                session["role"] = "donor"
-                session["user_id"] = default_donor["id"]
-                session["user_name"] = default_donor["name"]
+        if "user_id" not in session or session.get("role") != "donor":
+            # Allow demo access if user navigated directly, but encourage login
+            if "role" not in session:
+                default_donor = conn.execute("SELECT id, name FROM users WHERE role = 'donor' LIMIT 1").fetchone()
+                if default_donor:
+                    session["role"] = "donor"
+                    session["user_id"] = default_donor["id"]
+                    session["user_name"] = default_donor["name"]
 
-    error = None
-    matches = []
-    donor_id = session.get("user_id")
+        error = None
+        matches = []
+        donor_id = session.get("user_id")
 
-    if request.method == "POST":
-        food_type = request.form.get("food_type", "").strip()
-        quantity_str = request.form.get("quantity_kg", "0").strip()
-        cooked_at_raw = request.form.get("cooked_at", "").strip()
-        pickup_from_raw = request.form.get("pickup_from", "").strip()
-        pickup_to_raw = request.form.get("pickup_to", "").strip()
-        lat_str = request.form.get("lat", "31.3125").strip()
-        lng_str = request.form.get("lng", "75.5804").strip()
+        if request.method == "POST":
+            food_type = request.form.get("food_type", "").strip()
+            quantity_str = request.form.get("quantity_kg", "0").strip()
+            cooked_at_raw = request.form.get("cooked_at", "").strip()
+            pickup_from_raw = request.form.get("pickup_from", "").strip()
+            pickup_to_raw = request.form.get("pickup_to", "").strip()
+            lat_str = request.form.get("lat", "31.3125").strip()
+            lng_str = request.form.get("lng", "75.5804").strip()
 
-        # Handle empty inputs gracefully
-        now_str = get_current_time_str()
-        if not cooked_at_raw:
-            cooked_at_raw = now_str
-        if not pickup_from_raw:
-            pickup_from_raw = now_str
-        if not pickup_to_raw:
-            pickup_to_raw = format_datetime(datetime.now() + timedelta(hours=2))
+            # Handle empty inputs gracefully
+            now_str = get_current_time_str()
+            if not cooked_at_raw:
+                cooked_at_raw = now_str
+            if not pickup_from_raw:
+                pickup_from_raw = now_str
+            if not pickup_to_raw:
+                pickup_to_raw = format_datetime(datetime.now() + timedelta(hours=2))
 
-        try:
-            quantity_kg = float(quantity_str)
-            lat = float(lat_str)
-            lng = float(lng_str)
-        except ValueError:
-            error = "Please enter valid numeric values for quantity and coordinates."
-            quantity_kg, lat, lng = 0.0, 0.0, 0.0
+            try:
+                quantity_kg = float(quantity_str)
+                lat = float(lat_str)
+                lng = float(lng_str)
+            except ValueError:
+                error = "Please enter valid numeric values for quantity and coordinates."
+                quantity_kg, lat, lng = 0.0, 0.0, 0.0
 
-        if not error:
-            # 1. Food safety timer check
-            ok, safe_until, reason = check_safety(food_type, cooked_at_raw, now=now_str)
+            if not error:
+                # Validate Quantity > 0
+                if quantity_kg <= 0:
+                    error = "Quantity must be a positive number greater than 0 kg."
 
-            if not ok:
-                error = reason  # Reject donation post if safety rule fails
-            else:
-                # Format timestamps to standard 'YYYY-MM-DD HH:MM'
-                cooked_at = format_datetime(parse_datetime(cooked_at_raw))
-                pickup_from = format_datetime(parse_datetime(pickup_from_raw))
-                pickup_to = format_datetime(parse_datetime(pickup_to_raw))
+            if not error:
+                # 1. Food safety timer check
+                ok, safe_until, reason = check_safety(food_type, cooked_at_raw, now=now_str)
 
-                # 2. Match with nearby approved NGOs
-                ngos = conn.execute("SELECT * FROM users WHERE role = 'ngo' AND approved = 1").fetchall()
-                donation_info = {
-                    "quantity_kg": quantity_kg,
-                    "safe_until": safe_until,
-                    "pickup_from": pickup_from,
-                    "pickup_to": pickup_to,
-                    "lat": lat,
-                    "lng": lng
-                }
-                matches = rank_ngos(donation_info, ngos, now=now_str)
-
-                # Determine initial status
-                if matches:
-                    status = "matched"
-                    matched_ngo_id = matches[0]["ngo_id"]
+                if not ok:
+                    error = reason  # Reject donation post if safety rule fails
                 else:
-                    status = "posted"
-                    matched_ngo_id = None
+                    try:
+                        cooked_dt = parse_datetime(cooked_at_raw)
+                        pickup_from_dt = parse_datetime(pickup_from_raw)
+                        pickup_to_dt = parse_datetime(pickup_to_raw)
+                        safe_until_dt = parse_datetime(safe_until)
+                        now_dt = parse_datetime(now_str)
 
-                # 3. Insert donation into database
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO donations (
-                        donor_id, food_type, quantity_kg, cooked_at, safe_until,
-                        pickup_from, pickup_to, lat, lng, status, ngo_id, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    donor_id, food_type, quantity_kg, cooked_at, safe_until,
-                    pickup_from, pickup_to, lat, lng, status, matched_ngo_id, now_str
-                ))
-                donation_id = cursor.lastrowid
+                        # Edge Case 1: Pickup end before or equal to pickup start (negative or 0 window)
+                        if pickup_to_dt <= pickup_from_dt:
+                            error = "Invalid Pickup Window: End time must be later than Start time."
+                        # Edge Case 2: Entire pickup window in the past
+                        elif pickup_to_dt < now_dt - timedelta(minutes=5):
+                            error = "Invalid Pickup Window: Pickup end time has already elapsed. Please select a future window."
+                        # Edge Case 3: Pickup start before food was cooked
+                        elif pickup_from_dt < cooked_dt - timedelta(minutes=5):
+                            error = "Invalid Pickup Window: Pickup cannot start before the food was prepared/cooked."
+                        # Edge Case 4: Pickup start after safe consumption deadline
+                        elif pickup_from_dt >= safe_until_dt:
+                            error = f"Invalid Pickup Window: Pickup starts after the food's safe consumption deadline ({safe_until})."
 
-                # 4. Log lifecycle transitions in events: initial 'posted' then 'matched'
-                cursor.execute("INSERT INTO events (donation_id, status, time) VALUES (?, 'posted', ?)", (donation_id, now_str))
-                if status == "matched":
-                    cursor.execute("INSERT INTO events (donation_id, status, time) VALUES (?, 'matched', ?)", (donation_id, now_str))
+                        cooked_at = format_datetime(cooked_dt)
+                        pickup_from = format_datetime(pickup_from_dt)
+                        pickup_to = format_datetime(pickup_to_dt)
+                    except Exception as e:
+                        error = f"Date formatting error: {e}"
 
-                conn.commit()
+                    if not error:
+                        # 2. Match with nearby approved NGOs
+                        ngos = conn.execute("SELECT * FROM users WHERE role = 'ngo' AND approved = 1").fetchall()
+                        donation_info = {
+                            "quantity_kg": quantity_kg,
+                            "safe_until": safe_until,
+                            "pickup_from": pickup_from,
+                            "pickup_to": pickup_to,
+                            "lat": lat,
+                            "lng": lng
+                        }
+                        matches = rank_ngos(donation_info, ngos, now=now_str)
 
-    # Query all donations posted by this donor
-    donations = conn.execute("""
-        SELECT d.*, u.name as ngo_name
-        FROM donations d
-        LEFT JOIN users u ON d.ngo_id = u.id
-        WHERE d.donor_id = ?
-        ORDER BY d.id DESC
-    """, (donor_id,)).fetchall()
+                        # Determine initial status
+                        if matches:
+                            status = "matched"
+                            matched_ngo_id = matches[0]["ngo_id"]
+                        else:
+                            status = "posted"
+                            matched_ngo_id = None
 
-    conn.close()
-    return render_template(
-        "donor.html",
-        donations=donations,
-        matches=matches,
-        error=error,
-        role=session.get("role")
-    )
+                        # 3. Insert donation into database
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            INSERT INTO donations (
+                                donor_id, food_type, quantity_kg, cooked_at, safe_until,
+                                pickup_from, pickup_to, lat, lng, status, ngo_id, created_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            donor_id, food_type, quantity_kg, cooked_at, safe_until,
+                            pickup_from, pickup_to, lat, lng, status, matched_ngo_id, now_str
+                        ))
+                        donation_id = cursor.lastrowid
+
+                        # 4. Log lifecycle transitions in events: initial 'posted' then 'matched'
+                        cursor.execute("INSERT INTO events (donation_id, status, time) VALUES (?, 'posted', ?)", (donation_id, now_str))
+                        if status == "matched":
+                            cursor.execute("INSERT INTO events (donation_id, status, time) VALUES (?, 'matched', ?)", (donation_id, now_str))
+
+                        conn.commit()
+
+        # Query all donations posted by this donor
+        donations = conn.execute("""
+            SELECT d.*, u.name as ngo_name
+            FROM donations d
+            LEFT JOIN users u ON d.ngo_id = u.id
+            WHERE d.donor_id = ?
+            ORDER BY d.id DESC
+        """, (donor_id,)).fetchall()
+
+        return render_template(
+            "donor.html",
+            donations=donations,
+            matches=matches,
+            error=error,
+            role=session.get("role")
+        )
+    finally:
+        conn.close()
 
 
 @app.route("/matches/<int:donation_id>")
@@ -336,8 +369,18 @@ def ngo_offers():
             "distance_km": dist
         })
 
+    # Fetch active accepted rescues for this NGO so they can track assigned volunteers in real-time
+    active_rescues = conn.execute("""
+        SELECT d.*, u.name as donor_name, vol.name as volunteer_name
+        FROM donations d
+        JOIN users u ON d.donor_id = u.id
+        LEFT JOIN users vol ON d.volunteer_id = vol.id
+        WHERE d.ngo_id = ? AND d.status IN ('accepted', 'assigned', 'picked_up')
+        ORDER BY d.id DESC
+    """, (ngo_id,)).fetchall()
+
     conn.close()
-    return render_template("ngo.html", offers=offers, error=None, role=session.get("role"))
+    return render_template("ngo.html", offers=offers, active_rescues=active_rescues, error=None, role=session.get("role"))
 
 
 @app.route("/accept/<int:donation_id>", methods=["POST"])
@@ -621,6 +664,81 @@ def api_status(donation_id):
         "volunteer_name": row["volunteer_name"] or "Unassigned",
         "otp": row["otp"]
     })
+
+
+@app.route("/api/ngo/offers")
+def api_ngo_offers():
+    """Returns active donation offers for the current logged-in NGO in real time."""
+    conn = db.get_db()
+    expire_old_donations(conn)
+    ngo_id = session.get("user_id")
+    if not ngo_id or session.get("role") != "ngo":
+        default_ngo = conn.execute("SELECT id FROM users WHERE role = 'ngo' LIMIT 1").fetchone()
+        ngo_id = default_ngo["id"] if default_ngo else 1
+
+    ngo_user = conn.execute("SELECT * FROM users WHERE id = ?", (ngo_id,)).fetchone()
+    ngo_lat = ngo_user["lat"] if ngo_user and ngo_user["lat"] else 31.3217
+    ngo_lng = ngo_user["lng"] if ngo_user and ngo_user["lng"] else 75.5786
+
+    raw_offers = conn.execute("""
+        SELECT d.*, u.name as donor_name
+        FROM donations d
+        JOIN users u ON d.donor_id = u.id
+        WHERE (d.status = 'matched' AND d.ngo_id = ?) OR (d.status = 'posted')
+        ORDER BY d.id DESC
+    """, (ngo_id,)).fetchall()
+
+    offers = []
+    for row in raw_offers:
+        dist = haversine(ngo_lat, ngo_lng, row["lat"], row["lng"])
+        offers.append({
+            "id": row["id"],
+            "food_type": row["food_type"],
+            "donor_name": row["donor_name"],
+            "quantity_kg": row["quantity_kg"],
+            "safe_until": row["safe_until"],
+            "distance_km": dist
+        })
+
+    conn.close()
+    return jsonify(offers)
+
+
+@app.route("/api/volunteer/tasks")
+def api_volunteer_tasks():
+    """Returns assigned and in-progress tasks for volunteers in real time."""
+    conn = db.get_db()
+    expire_old_donations(conn)
+
+    tasks_query = conn.execute("""
+        SELECT d.*, 
+               donor.name as donor_name, donor.lat as donor_lat, donor.lng as donor_lng,
+               ngo.name as ngo_name, ngo.lat as ngo_lat, ngo.lng as ngo_lng
+        FROM donations d
+        JOIN users donor ON d.donor_id = donor.id
+        LEFT JOIN users ngo ON d.ngo_id = ngo.id
+        WHERE d.status IN ('accepted', 'assigned', 'picked_up')
+        ORDER BY d.id DESC
+    """).fetchall()
+
+    tasks = []
+    for t in tasks_query:
+        tasks.append({
+            "id": t["id"],
+            "food_type": t["food_type"],
+            "quantity_kg": t["quantity_kg"],
+            "status": t["status"],
+            "safe_until": t["safe_until"],
+            "pickup_address": t["donor_name"],
+            "ngo_name": t["ngo_name"] or "Local Relief Shelter",
+            "lat": t["lat"],
+            "lng": t["lng"],
+            "ngo_lat": t["ngo_lat"] or 31.3217,
+            "ngo_lng": t["ngo_lng"] or 75.5786
+        })
+
+    conn.close()
+    return jsonify(tasks)
 
 
 @app.route("/api/stats")

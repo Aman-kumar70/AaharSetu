@@ -34,20 +34,41 @@
     <!-- Form submits to POST /donate as required by backend contract -->
     <form id="donate-form" action="/donate" method="POST" class="space-y-4">
 
-      <!-- Food Type Dropdown -->
+      <!-- Food Type: Manual Typing + Autocomplete Datalist + Fast Chips -->
       <div>
-        <label for="food_type" class="block text-sm font-semibold text-gray-700 mb-1">
-          Food Type
-        </label>
-        <select id="food_type" name="food_type" required
-          class="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-green-500 focus:outline-none bg-white text-sm">
-          <option value="Cooked Meals (Rice & Dal)" selected>Cooked Meals (Rice & Dal)</option>
-          <option value="Roti & Paratha">Roti & Paratha</option>
-          <option value="Curry & Sabzi">Curry & Sabzi</option>
-          <option value="Snacks & Bakery">Snacks & Bakery</option>
-          <option value="Desserts & Sweets">Desserts & Sweets</option>
-        </select>
-        <p class="text-xs text-gray-400 mt-1">Food safety timer calculates freshness based on food type.</p>
+        <div class="flex items-center justify-between mb-1">
+          <label for="food_type" class="block text-sm font-semibold text-gray-700">
+            Food Type / Dish Name
+          </label>
+          <span class="text-2xs text-gray-400">Type any custom dish or select</span>
+        </div>
+        <div class="relative">
+          <input type="text" id="food_type" name="food_type" required list="food_type_list"
+            value="Cooked Meals (Rice & Dal)"
+            placeholder="Type dish name e.g. Veg Biryani, Roti, Dal, Paneer Sabzi, Sandwiches..."
+            class="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-green-500 focus:outline-none bg-white text-sm font-medium text-gray-800">
+          <datalist id="food_type_list">
+            <option value="Cooked Meals (Rice & Dal)">
+            <option value="Roti & Paratha">
+            <option value="Curry & Sabzi">
+            <option value="Veg Biryani / Pulao">
+            <option value="Snacks & Bakery">
+            <option value="Bread & Sandwiches">
+            <option value="Desserts & Sweets">
+            <option value="Dal Tadka & Rice">
+            <option value="Chole Bhature">
+            <option value="Paneer Butter Masala">
+          </datalist>
+        </div>
+        <!-- Fast Click Chips for Instant Demo Input -->
+        <div class="flex flex-wrap gap-1.5 mt-2">
+          <button type="button" onclick="selectFoodType('Cooked Meals (Rice & Dal)')" class="text-2xs bg-gray-100 hover:bg-green-100 text-gray-700 hover:text-green-800 px-2 py-0.5 rounded border border-gray-200 transition">🍚 Rice & Dal</button>
+          <button type="button" onclick="selectFoodType('Roti & Paratha')" class="text-2xs bg-gray-100 hover:bg-green-100 text-gray-700 hover:text-green-800 px-2 py-0.5 rounded border border-gray-200 transition">🫓 Roti & Paratha</button>
+          <button type="button" onclick="selectFoodType('Curry & Sabzi')" class="text-2xs bg-gray-100 hover:bg-green-100 text-gray-700 hover:text-green-800 px-2 py-0.5 rounded border border-gray-200 transition">🍲 Curry & Sabzi</button>
+          <button type="button" onclick="selectFoodType('Veg Biryani / Pulao')" class="text-2xs bg-gray-100 hover:bg-green-100 text-gray-700 hover:text-green-800 px-2 py-0.5 rounded border border-gray-200 transition">🥘 Biryani</button>
+          <button type="button" onclick="selectFoodType('Snacks & Bakery')" class="text-2xs bg-gray-100 hover:bg-green-100 text-gray-700 hover:text-green-800 px-2 py-0.5 rounded border border-gray-200 transition">🥪 Snacks</button>
+        </div>
+        <p class="text-xs text-gray-400 mt-1">Smart safety timer automatically calculates freshness for any typed dish.</p>
       </div>
 
       <!-- Quantity in Kilograms -->
@@ -69,29 +90,45 @@
           class="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-green-500 focus:outline-none text-sm text-gray-700">
       </div>
 
-      <!-- Pickup Window (From & To) -->
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label for="pickup_from" class="block text-sm font-semibold text-gray-700 mb-1">
-            Pickup Window From
+      <!-- Pickup Window: Handy Presets + Live Time-Validation -->
+      <div>
+        <div class="flex items-center justify-between mb-1">
+          <label class="block text-sm font-semibold text-gray-700">
+            Pickup Window
           </label>
-          <input type="datetime-local" id="pickup_from" name="pickup_from" value="2026-10-30T18:30" required
-            class="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-green-500 focus:outline-none text-xs text-gray-700">
+          <div class="flex items-center gap-1">
+            <span class="text-2xs text-gray-400">Quick Presets:</span>
+            <button type="button" onclick="setPickupPreset(2)" class="text-2xs bg-green-50 text-green-700 hover:bg-green-100 border border-green-300 font-semibold px-2 py-0.5 rounded transition">⚡ Ready Now (+2h)</button>
+            <button type="button" onclick="setPickupPreset(3)" class="text-2xs bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300 font-medium px-1.5 py-0.5 rounded transition">+3h</button>
+            <button type="button" onclick="setPickupPreset(4)" class="text-2xs bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300 font-medium px-1.5 py-0.5 rounded transition">+4h</button>
+          </div>
         </div>
-        <div>
-          <label for="pickup_to" class="block text-sm font-semibold text-gray-700 mb-1">
-            Pickup Window To
-          </label>
-          <input type="datetime-local" id="pickup_to" name="pickup_to" value="2026-10-30T21:00" required
-            class="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-green-500 focus:outline-none text-xs text-gray-700">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <span class="text-2xs text-gray-500 font-medium block mb-1">Available From (Start)</span>
+            <input type="datetime-local" id="pickup_from" name="pickup_from" required onchange="validatePickupWindow()"
+              class="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-green-500 focus:outline-none text-xs text-gray-700 bg-white">
+          </div>
+          <div>
+            <span class="text-2xs text-gray-500 font-medium block mb-1">Available Until (End)</span>
+            <input type="datetime-local" id="pickup_to" name="pickup_to" required onchange="validatePickupWindow()"
+              class="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-green-500 focus:outline-none text-xs text-gray-700 bg-white">
+          </div>
         </div>
+        <p id="pickup-window-feedback" class="text-2xs text-gray-400 mt-1">Specify when the NGO or volunteer can arrive for pickup.</p>
       </div>
 
       <!-- Pickup Location Dropdown (Fills hidden lat & lng via small JS) -->
       <div>
-        <label for="location_select" class="block text-sm font-semibold text-gray-700 mb-1">
-          Pickup Location (Jalandhar Hubs)
-        </label>
+        <div class="flex items-center justify-between mb-1">
+          <label for="location_select" class="block text-sm font-semibold text-gray-700">
+            Pickup Location (Jalandhar Hubs)
+          </label>
+          <button type="button" onclick="getCurrentGPSLocation()"
+            class="text-xs bg-green-50 text-green-700 hover:bg-green-100 border border-green-300 font-semibold px-2 py-0.5 rounded flex items-center gap-1 transition shadow-2xs">
+            📍 Use My Current GPS
+          </button>
+        </div>
         <select id="location_select" onchange="updateCoordinates()"
           class="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-green-500 focus:outline-none bg-white text-sm">
           <option value="31.3125,75.5804" selected>Model Town (Hostel & Canteen Complex)</option>
@@ -100,7 +137,7 @@
           <option value="31.3217,75.5786">BMC Chowk (Central Food District)</option>
           <option value="31.2858,75.5925">Urban Estate Phase 2 (University Campus)</option>
         </select>
-        <p class="text-xs text-gray-400 mt-1">Selects exact GPS coordinates for haversine matching.</p>
+        <p id="gps-status-msg" class="text-xs text-gray-400 mt-1">Selects exact GPS coordinates for haversine matching.</p>
       </div>
 
       <!-- Hidden inputs for lat and lng as required by contract -->
@@ -228,7 +265,7 @@
 
         <div class="grid grid-cols-2 gap-2 text-xs text-gray-600 bg-white p-2.5 rounded border border-gray-200 mt-2">
           <div><span class="text-gray-400">Safe Until:</span> {{ d.safe_until or "Calculating..." }}</div>
-          <div><span class="text-gray-400">Pickup Code:</span> <span class="font-mono font-bold text-green-700">{{ d.otp
+          <div><span class="text-gray-400">Pickup Code:</span> <span id="otp-{{ d.id }}" class="font-mono font-bold text-green-700">{{ d.otp
               or "Pending" }}</span></div>
           <div class="col-span-2">
             <span class="text-gray-400">Assigned NGO:</span>
@@ -317,6 +354,42 @@
 
 <!-- Vanilla JS: Updates hidden GPS latitude & longitude and handles demo submissions -->
 <script>
+  function getCurrentGPSLocation() {
+    var statusMsg = document.getElementById('gps-status-msg');
+    if (!navigator.geolocation) {
+      if (statusMsg) statusMsg.innerHTML = '<span class="text-red-500">Geolocation is not supported by this browser.</span>';
+      return;
+    }
+    if (statusMsg) statusMsg.innerHTML = '<span class="text-blue-600">⏳ Fetching real-time GPS coordinates...</span>';
+
+    navigator.geolocation.getCurrentPosition(
+      function (pos) {
+        var userLat = pos.coords.latitude.toFixed(4);
+        var userLng = pos.coords.longitude.toFixed(4);
+
+        document.getElementById('lat').value = userLat;
+        document.getElementById('lng').value = userLng;
+
+        var select = document.getElementById('location_select');
+        var opt = document.createElement('option');
+        opt.value = userLat + ',' + userLng;
+        opt.textContent = '📍 Current Device Location (' + userLat + ', ' + userLng + ')';
+        opt.selected = true;
+        select.prepend(opt);
+
+        if (statusMsg) {
+          statusMsg.innerHTML = '<span class="text-green-700 font-semibold">✓ Exact GPS Captured: ' + userLat + ', ' + userLng + '</span>';
+        }
+      },
+      function (err) {
+        if (statusMsg) {
+          statusMsg.innerHTML = '<span class="text-amber-600">⚠️ GPS unavailable or denied. Using selected location.</span>';
+        }
+      },
+      { timeout: 10000, enableHighAccuracy: true }
+    );
+  }
+
   function updateCoordinates() {
     var select = document.getElementById('location_select');
     var coords = select.value.split(',');
@@ -333,5 +406,73 @@
       document.getElementById('matches-section').scrollIntoView({ behavior: 'smooth' });
     }
   });
+  function formatForInput(date) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function initDynamicTimes() {
+    const now = new Date();
+    const cooked = new Date(now.getTime() - 30 * 60 * 1000); // 30 mins ago
+    const pickupStart = new Date(now.getTime());
+    const pickupEnd = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours from now
+
+    const cookedEl = document.getElementById('cooked_at');
+    const fromEl = document.getElementById('pickup_from');
+    const toEl = document.getElementById('pickup_to');
+
+    if (cookedEl && (!cookedEl.value || cookedEl.value.startsWith('2026-10-30'))) {
+      cookedEl.value = formatForInput(cooked);
+    }
+    if (fromEl && (!fromEl.value || fromEl.value.startsWith('2026-10-30'))) {
+      fromEl.value = formatForInput(pickupStart);
+      fromEl.min = formatForInput(new Date(now.getTime() - 60 * 60 * 1000));
+    }
+    if (toEl && (!toEl.value || toEl.value.startsWith('2026-10-30'))) {
+      toEl.value = formatForInput(pickupEnd);
+      toEl.min = formatForInput(pickupStart);
+    }
+  }
+
+  function setPickupPreset(hours) {
+    const now = new Date();
+    const toDate = new Date(now.getTime() + hours * 60 * 60 * 1000);
+    document.getElementById('pickup_from').value = formatForInput(now);
+    document.getElementById('pickup_to').value = formatForInput(toDate);
+    validatePickupWindow();
+  }
+
+  function selectFoodType(val) {
+    document.getElementById('food_type').value = val;
+  }
+
+  function validatePickupWindow() {
+    const fromVal = document.getElementById('pickup_from').value;
+    const toVal = document.getElementById('pickup_to').value;
+    const feedback = document.getElementById('pickup-window-feedback');
+    if (!fromVal || !toVal || !feedback) return;
+
+    const fromDate = new Date(fromVal);
+    const toDate = new Date(toVal);
+    const now = new Date();
+
+    if (toDate <= fromDate) {
+      feedback.innerHTML = '<span class="text-red-600 font-semibold">⚠️ End time must be after Start time (duration cannot be 0 or negative).</span>';
+      return false;
+    }
+    if (toDate < now) {
+      feedback.innerHTML = '<span class="text-red-600 font-semibold">⚠️ Pickup window has already elapsed in the past.</span>';
+      return false;
+    }
+    const diffHours = ((toDate - fromDate) / (1000 * 60 * 60)).toFixed(1);
+    feedback.innerHTML = `<span class="text-green-700 font-medium">✓ Valid window: ${diffHours} hours duration for pickup.</span>`;
+    return true;
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    initDynamicTimes();
+    validatePickupWindow();
+  });
+
 </script>
 {% endblock %}
