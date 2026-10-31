@@ -1,4 +1,6 @@
-# Surplus Food Rescue (CTBF-SE-06)
+# AaharSetu (CTBF-SE-06)
+Team - ChaosCoder
+Team ID - SMSI - T007
 > Built for **CT BuildFest 2.0** (30-Hour Hackathon)
 
 Cooked surplus food from college hostels, campus canteens, banquets, and restaurants is often discarded while nearby shelters and NGOs struggle with food insecurity.  
