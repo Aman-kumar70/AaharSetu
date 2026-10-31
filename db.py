@@ -6,6 +6,7 @@ Handles SQLite connection, table schema creation, and seeding demo data.
 
 import sqlite3
 from datetime import datetime, timedelta
+from werkzeug.security import generate_password_hash
 
 # Constant database filename
 DB_NAME = "food_rescue.db"
@@ -162,10 +163,16 @@ def seed_data(conn=None):
         ("Rohan Verma", "volunteer", "9781033333", 31.3100, 75.6000, "vol123", None, None, None, 1)
     ]
 
+    hashed_users = []
+    for u in demo_users:
+        # Securely hash user password with pbkdf2/scrypt
+        hashed_pw = generate_password_hash(u[5])
+        hashed_users.append((u[0], u[1], u[2], u[3], u[4], hashed_pw, u[6], u[7], u[8], u[9]))
+
     cursor.executemany("""
     INSERT INTO users (name, role, phone, lat, lng, password, capacity_kg, open_from, open_to, approved)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-    """, demo_users)
+    """, hashed_users)
 
     # Fetch IDs for the seeded demo users
     user_map = {}

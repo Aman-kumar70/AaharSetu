@@ -42,21 +42,49 @@ def haversine(lat1, lng1, lat2, lng2):
 def is_ngo_open(open_from, open_to, pickup_from_dt, pickup_to_dt):
     """
     Verifies if an NGO is open during the donor's proposed pickup window.
-    Compares HH:MM strings.
+    Robustly handles both:
+    1. Standard daytime operating hours (e.g. 08:00 to 22:00)
+    2. Overnight midnight-crossing hours for Night Shelters (e.g. 22:00 to 06:00)
     """
     if not open_from or not open_to:
-        return True  # If hours not set, assume open
+        return True  # If hours not specified, assume open
 
-    open_start = open_from.strip()
-    open_end = open_to.strip()
+    try:
+        def to_minutes(time_str):
+            parts = time_str.strip().split(":")
+            return int(parts[0]) * 60 + int(parts[1])
 
-    pickup_start = pickup_from_dt.strftime("%H:%M")
-    pickup_end = pickup_to_dt.strftime("%H:%M")
+        open_start = to_minutes(open_from)
+        open_end = to_minutes(open_to)
 
-    # If the entire pickup window is before opening or after closing
-    if pickup_end < open_start or pickup_start > open_end:
+        p_start = pickup_from_dt.hour * 60 + pickup_from_dt.minute
+        p_end = pickup_to_dt.hour * 60 + pickup_to_dt.minute
+
+        # Helper: checks if a specific minute falls within NGO operating hours
+        def is_instant_open(minute):
+            if open_start <= open_end:
+                # Standard daytime hours (e.g. 08:00 to 22:00)
+                return open_start <= minute <= open_end
+            else:
+                # Overnight hours (e.g. 22:00 to 06:00: open after 22:00 OR before 06:00)
+                return minute >= open_start or minute <= open_end
+
+        # 1. If either pickup start or pickup end falls in open hours
+        if is_instant_open(p_start) or is_instant_open(p_end):
+            return True
+
+        # 2. If pickup window spans across opening time
+        if p_start <= p_end:
+            if p_start <= open_start <= p_end:
+                return True
+        else:
+            # Pickup window itself crosses midnight
+            if open_start >= p_start or open_start <= p_end:
+                return True
+
         return False
-    return True
+    except Exception:
+        return True
 
 
 def rank_ngos(donation, ngos, now=None, exclude_ids=None):
@@ -169,6 +197,36 @@ def rank_ngos(donation, ngos, now=None, exclude_ids=None):
         })
 
     return top_3
+
+
+def find_nearest_volunteer(lat, lng, volunteers):
+    """
+    Finds the nearest registered volunteer using Haversine distance
+    from the donor's pickup coordinates.
+    
+    Parameters:
+    - lat, lng: Pickup location coordinates (float)
+    - volunteers: Iterable of volunteer dicts or sqlite3.Row with keys 'id', 'lat', 'lng'
+    
+    Returns:
+    - Dict with nearest volunteer info or None
+    """
+    if not volunteers:
+        return None
+
+    nearest_vol = None
+    min_dist = float("inf")
+
+    for v in volunteers:
+        v_dict = dict(v) if not isinstance(v, dict) else v
+        v_lat = float(v_dict["lat"]) if v_dict.get("lat") is not None else 31.3150
+        v_lng = float(v_dict["lng"]) if v_dict.get("lng") is not None else 75.5750
+        dist = haversine(float(lat), float(lng), v_lat, v_lng)
+        if dist < min_dist:
+            min_dist = dist
+            nearest_vol = v_dict
+
+    return nearest_vol
 
 
 if __name__ == "__main__":

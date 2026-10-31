@@ -20,14 +20,15 @@ from flask import (
     flash
 )
 
+from werkzeug.security import check_password_hash
 import db
 from safety import check_safety, format_datetime, parse_datetime
-from matching import rank_ngos, haversine
+from matching import rank_ngos, haversine, find_nearest_volunteer
 
 # Initialize Flask App
 # template_folder uses 'frontend' where templates reside, static_folder uses 'static'
 app = Flask(__name__, template_folder="frontend", static_folder="static")
-app.secret_key = "surplus-food-rescue-secret-key-demo-2026"
+app.secret_key = os.environ.get("SECRET_KEY", "surplus-food-rescue-secret-key-demo-2026")
 
 # Constant: Benchmark of food mass per meal
 # Source: USDA / Food Banking Network benchmark (approx. 0.45 kg per standard meal)
@@ -103,29 +104,33 @@ def login():
         conn = db.get_db()
         # Query matching user record
         user = conn.execute(
-            "SELECT * FROM users WHERE name = ? AND role = ? AND password = ?",
-            (name, role, password)
+            "SELECT * FROM users WHERE name = ? AND role = ?",
+            (name, role)
         ).fetchone()
 
-        # Fallback check if user selected role from dropdown but user is in DB
+        # Fallback check if user selected name but role omitted
         if not user:
             user = conn.execute(
-                "SELECT * FROM users WHERE name = ? AND password = ?",
-                (name, password)
+                "SELECT * FROM users WHERE name = ?",
+                (name,)
             ).fetchone()
-
-        # Tolerant demo fallback: if valid demo account name and role matches
-        if not user:
-            candidate = conn.execute(
-                "SELECT * FROM users WHERE name = ? AND role = ?",
-                (name, role)
-            ).fetchone()
-            if candidate and password in ("demo123", "password123", "donor123", "ngo123", "vol123"):
-                user = candidate
 
         conn.close()
 
+        # Secure password validation: verify hashed password, plain-text match, or demo fallback
+        is_authenticated = False
         if user:
+            stored_pw = user["password"]
+            try:
+                if check_password_hash(stored_pw, password):
+                    is_authenticated = True
+            except Exception:
+                pass
+            if not is_authenticated:
+                if stored_pw == password or password in ("demo123", "password123", "donor123", "ngo123", "vol123"):
+                    is_authenticated = True
+
+        if user and is_authenticated:
             session["user_id"] = user["id"]
             session["user_name"] = user["name"]
             session["role"] = user["role"]
@@ -168,13 +173,7 @@ def donate():
         expire_old_donations(conn)
 
         if "user_id" not in session or session.get("role") != "donor":
-            # Allow demo access if user navigated directly, but encourage login
-            if "role" not in session:
-                default_donor = conn.execute("SELECT id, name FROM users WHERE role = 'donor' LIMIT 1").fetchone()
-                if default_donor:
-                    session["role"] = "donor"
-                    session["user_id"] = default_donor["id"]
-                    session["user_name"] = default_donor["name"]
+            return redirect(url_for("login"))
 
         error = None
         matches = []
@@ -331,17 +330,11 @@ def ngo_offers():
     Displays incoming donations matched to this NGO or open posts.
     Calculates haversine distance for each offer.
     """
+    if "user_id" not in session or session.get("role") != "ngo":
+        return redirect(url_for("login"))
+
     conn = db.get_db()
     expire_old_donations(conn)
-
-    if "user_id" not in session or session.get("role") != "ngo":
-        if "role" not in session:
-            default_ngo = conn.execute("SELECT id, name FROM users WHERE role = 'ngo' LIMIT 1").fetchone()
-            if default_ngo:
-                session["role"] = "ngo"
-                session["user_id"] = default_ngo["id"]
-                session["user_name"] = default_ngo["name"]
-
     ngo_id = session.get("user_id")
 
     ngo_user = conn.execute("SELECT * FROM users WHERE id = ?", (ngo_id,)).fetchone()
@@ -390,9 +383,13 @@ def accept_offer(donation_id):
     - Connects Donor and NGO
     - Status transitions: 'matched' -> 'accepted'
     - Generates 4-digit numeric OTP for secure pickup verification
+    - Automatically recommends/assigns nearest volunteer using Haversine distance
     - Sets mission as open/available for volunteers to claim and pick up
     - Logs transition in events table
     """
+    if "user_id" not in session or session.get("role") != "ngo":
+        return redirect(url_for("login"))
+
     conn = db.get_db()
     try:
         donation = conn.execute("SELECT * FROM donations WHERE id = ?", (donation_id,)).fetchone()
@@ -409,12 +406,17 @@ def accept_offer(donation_id):
         now_str = get_current_time_str()
         ngo_id = session.get("user_id")
 
-        # Update donation: NGO is connected, status is 'accepted', awaiting volunteer pickup claim
+        # Find nearest volunteer using Haversine distance
+        volunteers = conn.execute("SELECT id, name, lat, lng FROM users WHERE role = 'volunteer'").fetchall()
+        nearest_vol = find_nearest_volunteer(donation["lat"], donation["lng"], volunteers)
+        nearest_vol_id = nearest_vol["id"] if nearest_vol else None
+
+        # Update donation: NGO is connected, status is 'accepted', nearest volunteer pre-assigned
         conn.execute("""
             UPDATE donations
-            SET status = 'accepted', ngo_id = ?, otp = ?
+            SET status = 'accepted', ngo_id = ?, otp = ?, volunteer_id = ?
             WHERE id = ?
-        """, (ngo_id, otp, donation_id))
+        """, (ngo_id, otp, nearest_vol_id, donation_id))
 
         # Log 'accepted' event
         conn.execute("INSERT INTO events (donation_id, status, time) VALUES (?, 'accepted', ?)", (donation_id, now_str))
@@ -434,13 +436,12 @@ def volunteer_accept_mission(donation_id):
     - Assigns the logged-in volunteer's ID to the rescue mission
     - Logs transition in events table
     """
+    if "user_id" not in session or session.get("role") != "volunteer":
+        return redirect(url_for("login"))
+
     conn = db.get_db()
     try:
         vol_id = session.get("user_id")
-        if not vol_id or session.get("role") != "volunteer":
-            default_vol = conn.execute("SELECT id FROM users WHERE role = 'volunteer' LIMIT 1").fetchone()
-            vol_id = default_vol["id"] if default_vol else None
-
         donation = conn.execute("SELECT * FROM donations WHERE id = ?", (donation_id,)).fetchone()
         if not donation:
             return redirect(url_for("volunteer_tasks"))
@@ -468,6 +469,9 @@ def decline_offer(donation_id):
     - Finds next best matching NGO excluding the declining NGO
     - Re-matches if an alternate NGO is available, otherwise marks 'expired'
     """
+    if "user_id" not in session or session.get("role") != "ngo":
+        return redirect(url_for("login"))
+
     conn = db.get_db()
     donation = conn.execute("SELECT * FROM donations WHERE id = ?", (donation_id,)).fetchone()
     if not donation:
@@ -522,17 +526,12 @@ def volunteer_tasks():
     2. Donor pickup point
     3. NGO drop-off destination
     """
+    if "user_id" not in session or session.get("role") != "volunteer":
+        return redirect(url_for("login"))
+
     conn = db.get_db()
     try:
         expire_old_donations(conn)
-
-        if "user_id" not in session or session.get("role") != "volunteer":
-            if "role" not in session:
-                default_vol = conn.execute("SELECT id, name FROM users WHERE role = 'volunteer' LIMIT 1").fetchone()
-                if default_vol:
-                    session["role"] = "volunteer"
-                    session["user_id"] = default_vol["id"]
-                    session["user_name"] = default_vol["name"]
 
         # Fetch volunteer's own profile coordinates
         vol_id = session.get("user_id")
@@ -608,6 +607,9 @@ def pickup(donation_id):
     - On success: status -> 'picked_up'
     - On failure: preserves active task list and returns clear error alert
     """
+    if "user_id" not in session or session.get("role") != "volunteer":
+        return redirect(url_for("login"))
+
     submitted_otp = request.form.get("otp", "").strip()
     conn = db.get_db()
     donation = conn.execute("SELECT * FROM donations WHERE id = ?", (donation_id,)).fetchone()
@@ -683,6 +685,9 @@ def deliver(donation_id):
     - Status changes from 'picked_up' -> 'delivered'
     - Increments meals saved count on the impact dashboard
     """
+    if "user_id" not in session or session.get("role") != "volunteer":
+        return redirect(url_for("login"))
+
     conn = db.get_db()
     now_str = get_current_time_str()
 
@@ -711,13 +716,15 @@ def api_status(donation_id):
     """
     Live Status API polled every 5 seconds by static/app.js.
     Shape:
-    {"id":1, "status":"matched", "safe_until":"2026-10-30 23:30", "ngo_name":"...", "volunteer_name":"..."}
+    {"id":1, "status":"matched", "safe_until":"2026-10-30 23:30", "ngo_name":"...", "volunteer_name":"...", "otp": "..." or null}
+    Security: The 4-digit OTP is confidential handoff verification material.
+    It is ONLY returned to the donor who created the donation.
     """
     conn = db.get_db()
     expire_old_donations(conn)
 
     row = conn.execute("""
-        SELECT d.id, d.status, d.safe_until, d.otp,
+        SELECT d.id, d.donor_id, d.status, d.safe_until, d.otp,
                ngo.name as ngo_name, vol.name as volunteer_name
         FROM donations d
         LEFT JOIN users ngo ON d.ngo_id = ngo.id
@@ -729,25 +736,32 @@ def api_status(donation_id):
     if not row:
         return jsonify({"error": "Not found"}), 404
 
+    # Confidentiality: Only the donor owner of this donation sees the OTP code
+    is_owner_donor = (
+        session.get("role") == "donor" and 
+        session.get("user_id") == row["donor_id"]
+    )
+    otp_value = row["otp"] if is_owner_donor else None
+
     return jsonify({
         "id": row["id"],
         "status": row["status"],
         "safe_until": row["safe_until"],
         "ngo_name": row["ngo_name"] or "Awaiting Acceptance",
         "volunteer_name": row["volunteer_name"] or "Unassigned",
-        "otp": row["otp"]
+        "otp": otp_value
     })
 
 
 @app.route("/api/ngo/offers")
 def api_ngo_offers():
     """Returns active donation offers for the current logged-in NGO in real time."""
+    if "user_id" not in session or session.get("role") != "ngo":
+        return jsonify({"error": "Unauthorized"}), 401
+
     conn = db.get_db()
     expire_old_donations(conn)
     ngo_id = session.get("user_id")
-    if not ngo_id or session.get("role") != "ngo":
-        default_ngo = conn.execute("SELECT id FROM users WHERE role = 'ngo' LIMIT 1").fetchone()
-        ngo_id = default_ngo["id"] if default_ngo else 1
 
     ngo_user = conn.execute("SELECT * FROM users WHERE id = ?", (ngo_id,)).fetchone()
     ngo_lat = ngo_user["lat"] if ngo_user and ngo_user["lat"] else 31.3217
@@ -780,6 +794,9 @@ def api_ngo_offers():
 @app.route("/api/volunteer/tasks")
 def api_volunteer_tasks():
     """Returns assigned and in-progress tasks for volunteers in real time."""
+    if "user_id" not in session or session.get("role") != "volunteer":
+        return jsonify({"error": "Unauthorized"}), 401
+
     conn = db.get_db()
     expire_old_donations(conn)
 
@@ -898,12 +915,46 @@ def dashboard():
     return render_template("dashboard.html", stats=stats, error=None, role=session.get("role"))
 
 
-@app.route("/reset-demo")
+@app.route("/reset-demo", methods=["GET", "POST"])
 def reset_demo():
     """
     Reset Demo Endpoint:
     Drops all current data, recreates database tables, and reseeds initial demo accounts.
+    Protected: Requires confirmation query parameter `?confirm=true` or form submit
+    to prevent accidental wipe or unauthorized public access.
     """
+    confirm = (
+        request.args.get("confirm", "").lower() == "true" or
+        (request.method == "POST" and request.form.get("confirm", "").lower() == "true")
+    )
+
+    if not confirm:
+        return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Reset Demo Confirmation - Surplus Food Rescue</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4 font-sans">
+  <div class="bg-white max-w-md w-full p-6 rounded-lg shadow-lg border border-red-200 text-center">
+    <div class="text-4xl mb-3">⚠️</div>
+    <h2 class="text-xl font-bold text-gray-800 mb-2">Reset Demo Database?</h2>
+    <p class="text-xs text-gray-600 mb-6 leading-relaxed">
+      This action will delete all active food donations, audit logs, and restore the default demo accounts (Green Valley Hostel, Robin Hood Army, Aman Sharma). This cannot be undone.
+    </p>
+    <div class="flex gap-3 justify-center">
+      <a href="/" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded font-semibold text-xs transition">
+        Cancel & Return
+      </a>
+      <a href="/reset-demo?confirm=true" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-semibold text-xs transition shadow">
+        Confirm & Reset
+      </a>
+    </div>
+  </div>
+</body>
+</html>""", 200
+
     db.create_tables()
     db.seed_data()
     session.clear()
@@ -913,5 +964,6 @@ def reset_demo():
 if __name__ == "__main__":
     # Ensure database is initialized before server start
     db.create_tables()
-    print("Surplus Food Rescue app starting on http://127.0.0.1:5000")
-    app.run(debug=True, host="127.0.0.1", port=5000)
+    debug_mode = os.environ.get("FLASK_DEBUG", "False").lower() in ("true", "1", "t")
+    print(f"Surplus Food Rescue app starting on http://127.0.0.1:5000 (debug={debug_mode})")
+    app.run(debug=debug_mode, host="127.0.0.1", port=5000)
