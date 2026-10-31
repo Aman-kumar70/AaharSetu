@@ -21,6 +21,7 @@ from flask import (
 )
 
 from werkzeug.security import check_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
 import db
 from safety import check_safety, format_datetime, parse_datetime
 from matching import rank_ngos, haversine, find_nearest_volunteer
@@ -28,7 +29,15 @@ from matching import rank_ngos, haversine, find_nearest_volunteer
 # Initialize Flask App
 # template_folder uses 'frontend' where templates reside, static_folder uses 'static'
 app = Flask(__name__, template_folder="frontend", static_folder="static")
-app.secret_key = os.environ.get("SECRET_KEY", "surplus-food-rescue-secret-key-demo-2026")
+app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32).hex()
+
+# Wrap app.wsgi_app with ProxyFix for reverse proxy support
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
+# Session cookie security settings
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = (os.environ.get("COOKIE_SECURE", "0") == "1")
 
 # Constant: Benchmark of food mass per meal
 # Source: USDA / Food Banking Network benchmark (approx. 0.45 kg per standard meal)
@@ -117,7 +126,7 @@ def login():
 
         conn.close()
 
-        # Secure password validation: verify hashed password, plain-text match, or demo fallback
+        # Secure password validation: keep only check_password_hash(stored_pw, password) and stored_pw == password
         is_authenticated = False
         if user:
             stored_pw = user["password"]
@@ -126,9 +135,8 @@ def login():
                     is_authenticated = True
             except Exception:
                 pass
-            if not is_authenticated:
-                if stored_pw == password or password in ("demo123", "password123", "donor123", "ngo123", "vol123"):
-                    is_authenticated = True
+            if not is_authenticated and stored_pw == password:
+                is_authenticated = True
 
         if user and is_authenticated:
             session["user_id"] = user["id"]
@@ -397,8 +405,11 @@ def accept_offer(donation_id):
         if not donation:
             return redirect(url_for("ngo_offers"))
 
-        # Guard against double-accept
-        if donation["status"] in ("accepted", "assigned", "picked_up", "delivered"):
+        # Allow only status in ('matched','posted'), and only if donation['ngo_id'] is empty or equals session['user_id']
+        if donation["status"] not in ("matched", "posted"):
+            return redirect(url_for("ngo_offers"))
+
+        if donation["ngo_id"] and donation["ngo_id"] != session.get("user_id"):
             return redirect(url_for("ngo_offers"))
 
         # Generate 4-digit verification OTP
@@ -478,6 +489,11 @@ def decline_offer(donation_id):
         conn.close()
         return redirect(url_for("ngo_offers"))
 
+    # Same checks as accept (status in matched/posted and ngo_id == session["user_id"])
+    if donation["status"] not in ("matched", "posted") or donation["ngo_id"] != session.get("user_id"):
+        conn.close()
+        return redirect(url_for("ngo_offers"))
+
     declining_ngo_id = session.get("user_id")
     now_str = get_current_time_str()
 
@@ -548,9 +564,9 @@ def volunteer_tasks():
             FROM donations d
             JOIN users donor ON d.donor_id = donor.id
             LEFT JOIN users ngo ON d.ngo_id = ngo.id
-            WHERE d.status IN ('accepted', 'assigned', 'picked_up')
+            WHERE d.status IN ('accepted', 'assigned', 'picked_up') AND d.volunteer_id = ?
             ORDER BY d.id DESC
-        """).fetchall()
+        """, (session.get("user_id"),)).fetchall()
 
         tasks = []
         upcoming_missions = []
@@ -624,6 +640,10 @@ def pickup(donation_id):
         conn.close()
         return redirect(url_for("volunteer_tasks"))
 
+    if donation["volunteer_id"] != session.get("user_id"):
+        conn.close()
+        return redirect(url_for("volunteer_tasks"))
+
     if donation["otp"] != submitted_otp:
         # Re-query active tasks so the page stays populated with action buttons
         tasks_query = conn.execute("""
@@ -633,9 +653,9 @@ def pickup(donation_id):
             FROM donations d
             JOIN users donor ON d.donor_id = donor.id
             LEFT JOIN users ngo ON d.ngo_id = ngo.id
-            WHERE d.status IN ('accepted', 'assigned', 'picked_up')
+            WHERE d.status IN ('accepted', 'assigned', 'picked_up') AND d.volunteer_id = ?
             ORDER BY d.id DESC
-        """).fetchall()
+        """, (session.get("user_id"),)).fetchall()
         tasks = []
         for t in tasks_query:
             tasks.append({
@@ -690,19 +710,22 @@ def deliver(donation_id):
 
     conn = db.get_db()
     now_str = get_current_time_str()
+    vol_id = session.get("user_id")
 
-    conn.execute("""
+    cursor = conn.cursor()
+    cursor.execute("""
         UPDATE donations
         SET status = 'delivered'
-        WHERE id = ?
-    """, (donation_id,))
+        WHERE id = ? AND status = 'picked_up' AND volunteer_id = ?
+    """, (donation_id, vol_id))
 
-    conn.execute("""
-        INSERT INTO events (donation_id, status, time)
-        VALUES (?, 'delivered', ?)
-    """, (donation_id, now_str))
+    if cursor.rowcount == 1:
+        cursor.execute("""
+            INSERT INTO events (donation_id, status, time)
+            VALUES (?, 'delivered', ?)
+        """, (donation_id, now_str))
+        conn.commit()
 
-    conn.commit()
     conn.close()
     return redirect(url_for("volunteer_tasks"))
 
@@ -807,9 +830,9 @@ def api_volunteer_tasks():
         FROM donations d
         JOIN users donor ON d.donor_id = donor.id
         LEFT JOIN users ngo ON d.ngo_id = ngo.id
-        WHERE d.status IN ('accepted', 'assigned', 'picked_up')
+        WHERE d.status IN ('accepted', 'assigned', 'picked_up') AND d.volunteer_id = ?
         ORDER BY d.id DESC
-    """).fetchall()
+    """, (session.get("user_id"),)).fetchall()
 
     tasks = []
     for t in tasks_query:
@@ -920,16 +943,20 @@ def reset_demo():
     """
     Reset Demo Endpoint:
     Drops all current data, recreates database tables, and reseeds initial demo accounts.
-    Protected: Requires confirmation query parameter `?confirm=true` or form submit
-    to prevent accidental wipe or unauthorized public access.
+    Protected: Requires RESET_KEY env var and matching key parameter in request.
     """
+    reset_key = os.environ.get("RESET_KEY")
+    req_key = request.args.get("key") or (request.form.get("key") if request.form else None)
+    if not reset_key or req_key != reset_key:
+        return "Forbidden: invalid or missing RESET_KEY", 403
+
     confirm = (
         request.args.get("confirm", "").lower() == "true" or
         (request.method == "POST" and request.form.get("confirm", "").lower() == "true")
     )
 
     if not confirm:
-        return """<!DOCTYPE html>
+        return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -938,7 +965,7 @@ def reset_demo():
 </head>
 <body class="bg-gray-100 flex items-center justify-center min-h-screen p-4 font-sans">
   <div class="bg-white max-w-md w-full p-6 rounded-lg shadow-lg border border-red-200 text-center">
-    <div class="text-4xl mb-3">⚠️</div>
+    <div class="text-4xl mb-3">&#9888;</div>
     <h2 class="text-xl font-bold text-gray-800 mb-2">Reset Demo Database?</h2>
     <p class="text-xs text-gray-600 mb-6 leading-relaxed">
       This action will delete all active food donations, audit logs, and restore the default demo accounts (Green Valley Hostel, Robin Hood Army, Aman Sharma). This cannot be undone.
@@ -947,7 +974,7 @@ def reset_demo():
       <a href="/" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded font-semibold text-xs transition">
         Cancel & Return
       </a>
-      <a href="/reset-demo?confirm=true" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-semibold text-xs transition shadow">
+      <a href="/reset-demo?confirm=true&key={req_key}" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-semibold text-xs transition shadow">
         Confirm & Reset
       </a>
     </div>
@@ -964,6 +991,17 @@ def reset_demo():
 if __name__ == "__main__":
     # Ensure database is initialized before server start
     db.create_tables()
-    debug_mode = os.environ.get("FLASK_DEBUG", "False").lower() in ("true", "1", "t")
-    print(f"Surplus Food Rescue app starting on http://127.0.0.1:5000 (debug={debug_mode})")
-    app.run(debug=debug_mode, host="127.0.0.1", port=5000)
+    is_debug = os.environ.get("FLASK_DEBUG", "False").lower() in ("true", "1", "t")
+    port = int(os.environ.get("PORT", 5000))
+
+    if is_debug:
+        print(f"Surplus Food Rescue app starting on http://127.0.0.1:{port} (debug=True)")
+        app.run(debug=True, host="127.0.0.1", port=port)
+    else:
+        try:
+            from waitress import serve
+            print(f"Surplus Food Rescue app starting with Waitress on http://127.0.0.1:{port} (threads=8)")
+            serve(app, host="127.0.0.1", port=port, threads=8)
+        except ImportError:
+            print(f"Surplus Food Rescue app starting on http://127.0.0.1:{port} (debug=False, threaded=True)")
+            app.run(debug=False, threaded=True, host="127.0.0.1", port=port)
