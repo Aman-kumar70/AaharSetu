@@ -387,46 +387,78 @@ def ngo_offers():
 def accept_offer(donation_id):
     """
     NGO accepts donation offer:
-    - Status transitions from 'matched' -> 'accepted' -> 'assigned'
-    - Generates 4-digit numeric OTP for secure volunteer pickup handoff
-    - Automatically assigns an active volunteer for transport
-    - Logs transitions in events table
+    - Connects Donor and NGO
+    - Status transitions: 'matched' -> 'accepted'
+    - Generates 4-digit numeric OTP for secure pickup verification
+    - Sets mission as open/available for volunteers to claim and pick up
+    - Logs transition in events table
     """
     conn = db.get_db()
-    donation = conn.execute("SELECT * FROM donations WHERE id = ?", (donation_id,)).fetchone()
+    try:
+        donation = conn.execute("SELECT * FROM donations WHERE id = ?", (donation_id,)).fetchone()
 
-    if not donation:
-        conn.close()
+        if not donation:
+            return redirect(url_for("ngo_offers"))
+
+        # Guard against double-accept
+        if donation["status"] in ("accepted", "assigned", "picked_up", "delivered"):
+            return redirect(url_for("ngo_offers"))
+
+        # Generate 4-digit verification OTP
+        otp = f"{random.randint(1000, 9999)}"
+        now_str = get_current_time_str()
+        ngo_id = session.get("user_id")
+
+        # Update donation: NGO is connected, status is 'accepted', awaiting volunteer pickup claim
+        conn.execute("""
+            UPDATE donations
+            SET status = 'accepted', ngo_id = ?, otp = ?
+            WHERE id = ?
+        """, (ngo_id, otp, donation_id))
+
+        # Log 'accepted' event
+        conn.execute("INSERT INTO events (donation_id, status, time) VALUES (?, 'accepted', ?)", (donation_id, now_str))
+
+        conn.commit()
         return redirect(url_for("ngo_offers"))
-
-    # Guard against double-accept
-    if donation["status"] in ("accepted", "assigned", "picked_up", "delivered"):
+    finally:
         conn.close()
-        return redirect(url_for("ngo_offers"))
 
-    # Generate 4-digit verification OTP
-    otp = f"{random.randint(1000, 9999)}"
-    now_str = get_current_time_str()
-    ngo_id = session.get("user_id")
 
-    # Find an active volunteer to assign
-    vol_user = conn.execute("SELECT id FROM users WHERE role = 'volunteer' ORDER BY id ASC LIMIT 1").fetchone()
-    volunteer_id = vol_user["id"] if vol_user else None
+@app.route("/volunteer/accept/<int:donation_id>", methods=["POST"])
+@app.route("/accept-task/<int:donation_id>", methods=["POST"])
+def volunteer_accept_mission(donation_id):
+    """
+    Volunteer accepts/claims an upcoming pickup mission:
+    - Status transitions: 'accepted' -> 'assigned'
+    - Assigns the logged-in volunteer's ID to the rescue mission
+    - Logs transition in events table
+    """
+    conn = db.get_db()
+    try:
+        vol_id = session.get("user_id")
+        if not vol_id or session.get("role") != "volunteer":
+            default_vol = conn.execute("SELECT id FROM users WHERE role = 'volunteer' LIMIT 1").fetchone()
+            vol_id = default_vol["id"] if default_vol else None
 
-    # Transition to 'assigned' so the volunteer dashboard displays pickup form immediately
-    conn.execute("""
-        UPDATE donations
-        SET status = 'assigned', ngo_id = ?, otp = ?, volunteer_id = ?
-        WHERE id = ?
-    """, (ngo_id, otp, volunteer_id, donation_id))
+        donation = conn.execute("SELECT * FROM donations WHERE id = ?", (donation_id,)).fetchone()
+        if not donation:
+            return redirect(url_for("volunteer_tasks"))
 
-    # Log complete status lifecycle events in chronological order
-    conn.execute("INSERT INTO events (donation_id, status, time) VALUES (?, 'accepted', ?)", (donation_id, now_str))
-    conn.execute("INSERT INTO events (donation_id, status, time) VALUES (?, 'assigned', ?)", (donation_id, now_str))
+        now_str = get_current_time_str()
 
-    conn.commit()
-    conn.close()
-    return redirect(url_for("ngo_offers"))
+        # Advance status to 'assigned' and bind logged-in volunteer
+        conn.execute("""
+            UPDATE donations
+            SET status = 'assigned', volunteer_id = ?
+            WHERE id = ?
+        """, (vol_id, donation_id))
+
+        conn.execute("INSERT INTO events (donation_id, status, time) VALUES (?, 'assigned', ?)", (donation_id, now_str))
+        conn.commit()
+        return redirect(url_for("volunteer_tasks"))
+    finally:
+        conn.close()
 
 
 @app.route("/decline/<int:donation_id>", methods=["POST"])
@@ -485,51 +517,87 @@ def decline_offer(donation_id):
 def volunteer_tasks():
     """
     Volunteer Workspace:
-    Displays available and active pickup/delivery tasks.
+    Displays available and active pickup/delivery tasks with 3-point map route:
+    1. Volunteer current position
+    2. Donor pickup point
+    3. NGO drop-off destination
     """
     conn = db.get_db()
-    expire_old_donations(conn)
+    try:
+        expire_old_donations(conn)
 
-    if "user_id" not in session or session.get("role") != "volunteer":
-        if "role" not in session:
-            default_vol = conn.execute("SELECT id, name FROM users WHERE role = 'volunteer' LIMIT 1").fetchone()
-            if default_vol:
-                session["role"] = "volunteer"
-                session["user_id"] = default_vol["id"]
-                session["user_name"] = default_vol["name"]
+        if "user_id" not in session or session.get("role") != "volunteer":
+            if "role" not in session:
+                default_vol = conn.execute("SELECT id, name FROM users WHERE role = 'volunteer' LIMIT 1").fetchone()
+                if default_vol:
+                    session["role"] = "volunteer"
+                    session["user_id"] = default_vol["id"]
+                    session["user_name"] = default_vol["name"]
 
-    # Fetch tasks ready for volunteer action: accepted, assigned, or picked_up
-    tasks_query = conn.execute("""
-        SELECT d.*, 
-               donor.name as donor_name, donor.lat as donor_lat, donor.lng as donor_lng,
-               ngo.name as ngo_name, ngo.lat as ngo_lat, ngo.lng as ngo_lng
-        FROM donations d
-        JOIN users donor ON d.donor_id = donor.id
-        LEFT JOIN users ngo ON d.ngo_id = ngo.id
-        WHERE d.status IN ('accepted', 'assigned', 'picked_up')
-        ORDER BY d.id DESC
-    """).fetchall()
+        # Fetch volunteer's own profile coordinates
+        vol_id = session.get("user_id")
+        vol_user = conn.execute("SELECT * FROM users WHERE id = ?", (vol_id,)).fetchone()
+        vol_lat = float(vol_user["lat"]) if (vol_user and vol_user["lat"]) else 31.3150
+        vol_lng = float(vol_user["lng"]) if (vol_user and vol_user["lng"]) else 75.5750
+        vol_name = vol_user["name"] if vol_user else "Volunteer"
 
-    tasks = []
-    for t in tasks_query:
-        pickup_addr = t["donor_name"]
-        ngo_disp = t["ngo_name"] or "Local Relief Shelter"
-        tasks.append({
-            "id": t["id"],
-            "food_type": t["food_type"],
-            "quantity_kg": t["quantity_kg"],
-            "status": t["status"],
-            "safe_until": t["safe_until"],
-            "pickup_address": pickup_addr,
-            "ngo_name": ngo_disp,
-            "lat": t["lat"],
-            "lng": t["lng"],
-            "ngo_lat": t["ngo_lat"] or 31.3217,
-            "ngo_lng": t["ngo_lng"] or 75.5786
-        })
+        # Fetch tasks ready for volunteer action: accepted, assigned, or picked_up
+        tasks_query = conn.execute("""
+            SELECT d.*, 
+                   donor.name as donor_name, donor.lat as donor_lat, donor.lng as donor_lng,
+                   ngo.name as ngo_name, ngo.lat as ngo_lat, ngo.lng as ngo_lng
+            FROM donations d
+            JOIN users donor ON d.donor_id = donor.id
+            LEFT JOIN users ngo ON d.ngo_id = ngo.id
+            WHERE d.status IN ('accepted', 'assigned', 'picked_up')
+            ORDER BY d.id DESC
+        """).fetchall()
 
-    conn.close()
-    return render_template("volunteer.html", tasks=tasks, error=None, role=session.get("role"))
+        tasks = []
+        upcoming_missions = []
+        active_tasks = []
+
+        for t in tasks_query:
+            pickup_addr = t["donor_name"]
+            ngo_disp = t["ngo_name"] or "Local Relief Shelter"
+            donor_lat = float(t["lat"]) if t["lat"] else 31.3125
+            donor_lng = float(t["lng"]) if t["lng"] else 75.5804
+            ngo_lat = float(t["ngo_lat"]) if t["ngo_lat"] else 31.3217
+            ngo_lng = float(t["ngo_lng"]) if t["ngo_lng"] else 75.5786
+
+            task_obj = {
+                "id": t["id"],
+                "food_type": t["food_type"],
+                "quantity_kg": t["quantity_kg"],
+                "status": t["status"],
+                "safe_until": t["safe_until"],
+                "pickup_address": pickup_addr,
+                "ngo_name": ngo_disp,
+                "lat": donor_lat,
+                "lng": donor_lng,
+                "ngo_lat": ngo_lat,
+                "ngo_lng": ngo_lng
+            }
+            tasks.append(task_obj)
+
+            if t["status"] == 'accepted':
+                upcoming_missions.append(task_obj)
+            else:
+                active_tasks.append(task_obj)
+
+        return render_template(
+            "volunteer.html",
+            tasks=tasks,
+            upcoming_missions=upcoming_missions,
+            active_tasks=active_tasks,
+            volunteer_lat=vol_lat,
+            volunteer_lng=vol_lng,
+            volunteer_name=vol_name,
+            error=None,
+            role=session.get("role")
+        )
+    finally:
+        conn.close()
 
 
 @app.route("/pickup/<int:donation_id>", methods=["POST"])
@@ -549,6 +617,11 @@ def pickup(donation_id):
         return redirect(url_for("volunteer_tasks"))
 
     # OTP Verification check
+    # Allow pickup verification on either 'assigned' or 'accepted'
+    if donation["status"] not in ("assigned", "accepted"):
+        conn.close()
+        return redirect(url_for("volunteer_tasks"))
+
     if donation["otp"] != submitted_otp:
         # Re-query active tasks so the page stays populated with action buttons
         tasks_query = conn.execute("""

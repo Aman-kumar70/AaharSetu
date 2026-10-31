@@ -52,7 +52,8 @@
             <p class="text-xs text-gray-500">Donor: <span class="font-medium text-gray-700">{{ r.donor_name }}</span></p>
           </div>
           <span class="px-2 py-0.5 rounded text-2xs font-semibold uppercase 
-            {% if r.status == 'assigned' %}bg-purple-100 text-purple-800
+            {% if r.status == 'accepted' %}bg-blue-100 text-blue-800
+            {% elif r.status == 'assigned' %}bg-purple-100 text-purple-800
             {% elif r.status == 'picked_up' %}bg-orange-100 text-orange-800
             {% else %}bg-green-100 text-green-800{% endif %}">
             {{ r.status }}
@@ -62,7 +63,7 @@
         <div class="flex items-center justify-between text-xs text-gray-600 bg-white p-2 rounded border border-purple-100">
           <div>
             <span class="text-gray-400">Assigned Volunteer:</span>
-            <span class="font-bold text-purple-900 ml-1">🛵 {{ r.volunteer_name or "Aman Sharma" }}</span>
+            <span class="font-bold text-purple-900 ml-1">🛵 {{ r.volunteer_name or "Awaiting Volunteer Claim" }}</span>
           </div>
           <div>
             <span class="text-gray-400">Safe Until:</span>

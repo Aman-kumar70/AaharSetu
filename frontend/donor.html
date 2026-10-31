@@ -399,6 +399,11 @@
 
   // Standalone connection: in file:// mode, show immediate match feedback without server
   document.getElementById('donate-form').addEventListener('submit', function (e) {
+    if (!validatePickupWindow()) {
+      e.preventDefault();
+      alert("Please fix the pickup window times: End time must be after Start time and cannot be in the past.");
+      return;
+    }
     if (window.location.protocol === 'file:') {
       e.preventDefault();
       var toast = document.getElementById('demo-success-toast');

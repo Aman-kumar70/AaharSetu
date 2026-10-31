@@ -1,3 +1,14 @@
+// Helper to safely escape strings in DOM injection
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // Generated with AI, reviewed and modified by the team
 // static/app.js - Full Real-Time Live Status & Cross-Role Synchronization
 
@@ -156,8 +167,9 @@ function pollNgoOffers() {
 // 3. VOLUNTEER TASKS PAGE: Auto-sync accepted missions & pickup handoffs
 // -----------------------------------------------------------------------------
 function pollVolunteerTasks() {
-  const container = document.getElementById("volunteer-tasks-container");
-  if (!container) return;
+  const activeContainer = document.getElementById("volunteer-tasks-container");
+  const upcomingContainer = document.getElementById("upcoming-missions-container");
+  if (!activeContainer && !upcomingContainer) return;
 
   fetch("/api/volunteer/tasks")
     .then((res) => {
@@ -171,71 +183,120 @@ function pollVolunteerTasks() {
       if (currentJson === lastVolunteerTasksJson) return;
       lastVolunteerTasksJson = currentJson;
 
-      if (tasks.length === 0) {
-        container.innerHTML = `
-          <div class="p-6 bg-white rounded-lg border border-gray-200 text-center text-sm text-gray-500">
-            <span class="text-2xl block mb-1">🛵</span>
-            <p class="font-semibold text-gray-700">No active delivery tasks.</p>
-            <p class="text-xs text-gray-400 mt-1">When an NGO accepts a donation, the task will appear here live with the OTP pickup form!</p>
-          </div>`;
-        return;
-      }
+      const upcoming = tasks.filter((t) => t.status === "accepted");
+      const active = tasks.filter((t) => t.status !== "accepted");
 
-      container.innerHTML = tasks
-        .map((t) => {
-          let statusBadgeClass = "bg-gray-100 text-gray-800";
-          if (t.status === "assigned") statusBadgeClass = "bg-purple-100 text-purple-800";
-          else if (t.status === "picked_up") statusBadgeClass = "bg-orange-100 text-orange-800";
-          else if (t.status === "delivered") statusBadgeClass = "bg-green-100 text-green-800";
-
-          let actionFormHtml = "";
-          if (t.status === "assigned") {
-            actionFormHtml = `
-              <form action="/pickup/${t.id}" method="POST" class="pt-2">
-                <label class="block text-xs font-semibold text-gray-700 mb-1">
-                  Enter 4-Digit Donor Verification OTP:
-                </label>
-                <div class="flex gap-2">
-                  <input type="text" name="otp" required maxlength="4" pattern="[0-9]{4}" placeholder="e.g. 4821"
-                    class="flex-1 px-3 py-2 border border-gray-300 rounded text-center tracking-widest font-mono text-base font-bold focus:ring-2 focus:ring-purple-500 focus:outline-none bg-white">
-                  <button type="submit"
-                    class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded text-sm transition shadow-sm">
-                    Confirm Pickup
+      // 1. Update Upcoming Missions Container
+      if (upcomingContainer) {
+        if (upcoming.length === 0) {
+          upcomingContainer.innerHTML = `
+            <div class="p-4 bg-gray-50 rounded-lg border border-dashed border-gray-300 text-center text-xs text-gray-400">
+              No new missions waiting right now. When an NGO accepts a donor's food offer, it will appear here for you to accept and pick up!
+            </div>`;
+        } else {
+          upcomingContainer.innerHTML = upcoming
+            .map((t) => `
+              <div class="bg-white rounded-lg shadow-sm border border-blue-200 p-4 space-y-3 hover:border-blue-300 transition">
+                <div class="flex justify-between items-start">
+                  <div>
+                    <h3 class="font-bold text-gray-800 text-base">${escapeHtml(t.food_type)}</h3>
+                    <p class="text-xs text-gray-500">Quantity: <span class="font-semibold text-gray-700">${t.quantity_kg} kg</span></p>
+                  </div>
+                  <span class="px-2.5 py-1 rounded-full text-xs font-semibold uppercase bg-blue-100 text-blue-800 border border-blue-200">
+                    Awaiting Pickup Claim
+                  </span>
+                </div>
+                <div class="text-xs space-y-1.5 bg-blue-50/50 p-3 rounded border border-blue-100">
+                  <div><span class="text-gray-500 font-medium">📍 Pickup At:</span> <span class="font-bold text-gray-800">${escapeHtml(t.pickup_address || "Donor Location")}</span></div>
+                  <div><span class="text-gray-500 font-medium">🏁 Deliver To:</span> <span class="font-bold text-gray-800">${escapeHtml(t.ngo_name || "Partner Shelter")}</span></div>
+                  <div><span class="text-gray-500 font-medium">⏰ Safe Until:</span> <span class="font-bold text-red-600">${t.safe_until}</span></div>
+                </div>
+                <div class="flex gap-2 pt-1">
+                  <form action="/volunteer/accept/${t.id}" method="POST" class="flex-1">
+                    <button type="submit"
+                      class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 px-4 rounded text-sm transition shadow-sm flex items-center justify-center gap-1.5">
+                      <span>🛵</span> Accept & Claim Mission
+                    </button>
+                  </form>
+                  <button type="button" 
+                    data-lat="${t.lat}" data-lng="${t.lng}" data-ngo-lat="${t.ngo_lat}" data-ngo-lng="${t.ngo_lng}"
+                    data-pickup="${escapeHtml(t.pickup_address)}" data-ngo="${escapeHtml(t.ngo_name)}"
+                    onclick="focusFromButton(this)"
+                    class="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-semibold border border-gray-300 transition" title="Show route on map">
+                    🗺️ Route
                   </button>
                 </div>
-              </form>`;
-          } else if (t.status === "picked_up") {
-            actionFormHtml = `
-              <form action="/deliver/${t.id}" method="POST" class="pt-2">
-                <button type="submit"
-                  class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2.5 px-4 rounded text-sm transition shadow-sm">
-                  ✓ Mark As Delivered
-                </button>
-              </form>`;
-          }
+              </div>`)
+            .join("");
+        }
+      }
 
-          return `
-            <div class="bg-white rounded-lg shadow border border-gray-200 p-4 space-y-3">
-              <div class="flex justify-between items-start">
-                <div>
-                  <h3 class="font-bold text-gray-800 text-base">${t.food_type}</h3>
-                  <p class="text-xs text-gray-500">Weight: <span class="font-semibold text-gray-700">${t.quantity_kg} kg</span></p>
-                </div>
-                <span id="status-${t.id}" class="px-2.5 py-1 rounded-full text-xs font-semibold uppercase ${statusBadgeClass}">
-                  ${t.status}
-                </span>
-              </div>
-
-              <div class="text-xs space-y-1.5 bg-gray-50 p-3 rounded border border-gray-100">
-                <div><span class="text-gray-400 font-medium">Pickup At:</span> <span class="font-semibold text-gray-700">${t.pickup_address}</span></div>
-                <div><span class="text-gray-400 font-medium">Deliver To:</span> <span class="font-semibold text-gray-700">${t.ngo_name}</span></div>
-                <div><span class="text-gray-400 font-medium">Safe Until:</span> <span class="font-bold text-red-600">${t.safe_until}</span></div>
-              </div>
-
-              ${actionFormHtml}
+      // 2. Update Active Missions Container
+      if (activeContainer) {
+        if (active.length === 0) {
+          activeContainer.innerHTML = `
+            <div class="p-5 bg-white rounded-lg border border-gray-200 text-center text-xs text-gray-400">
+              No active deliveries claimed yet. Accept an upcoming mission above to begin your rescue route!
             </div>`;
-        })
-        .join("");
+        } else {
+          activeContainer.innerHTML = active
+            .map((t) => {
+              let statusBadgeClass = "bg-gray-100 text-gray-800";
+              if (t.status === "assigned") statusBadgeClass = "bg-purple-100 text-purple-800";
+              else if (t.status === "picked_up") statusBadgeClass = "bg-orange-100 text-orange-800";
+              else if (t.status === "delivered") statusBadgeClass = "bg-green-100 text-green-800";
+
+              let actionFormHtml = "";
+              if (t.status === "assigned") {
+                actionFormHtml = `
+                  <form action="/pickup/${t.id}" method="POST" class="pt-2">
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">
+                      Enter 4-Digit Donor Verification OTP:
+                    </label>
+                    <div class="flex gap-2">
+                      <input type="text" name="otp" required maxlength="4" pattern="[0-9]{4}" placeholder="e.g. 4821"
+                        class="flex-1 px-3 py-2 border border-gray-300 rounded text-center tracking-widest font-mono text-base font-bold focus:ring-2 focus:ring-purple-500 focus:outline-none bg-white">
+                      <button type="submit"
+                        class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded text-sm transition shadow-sm">
+                        Confirm Pickup
+                      </button>
+                    </div>
+                    <p class="text-2xs text-gray-400 mt-1">Get this 4-digit code from the donor upon physical arrival.</p>
+                  </form>`;
+              } else if (t.status === "picked_up") {
+                actionFormHtml = `
+                  <form action="/deliver/${t.id}" method="POST" class="pt-2">
+                    <button type="submit"
+                      class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 px-4 rounded text-sm transition shadow-sm">
+                      ✓ Mark As Delivered to Shelter
+                    </button>
+                  </form>`;
+              }
+
+              return `
+                <div class="bg-white rounded-lg shadow border border-gray-200 p-4 space-y-3">
+                  <div class="flex justify-between items-start">
+                    <div>
+                      <h3 class="font-bold text-gray-800 text-base">${escapeHtml(t.food_type)}</h3>
+                      <p class="text-xs text-gray-500">Weight: <span class="font-semibold text-gray-700">${t.quantity_kg} kg</span></p>
+                    </div>
+                    <span id="status-${t.id}" class="px-2.5 py-1 rounded-full text-xs font-semibold uppercase ${statusBadgeClass}">
+                      ${t.status}
+                    </span>
+                  </div>
+
+                  <div class="text-xs space-y-1.5 bg-gray-50 p-3 rounded border border-gray-100">
+                    <div><span class="text-gray-400 font-medium">Pickup At:</span> <span class="font-semibold text-gray-700">${escapeHtml(t.pickup_address || "Donor Location")}</span></div>
+                    <div><span class="text-gray-400 font-medium">Deliver To:</span> <span class="font-semibold text-gray-700">${escapeHtml(t.ngo_name || "Partner Shelter")}</span></div>
+                    <div><span class="text-gray-400 font-medium">Safe Until:</span> <span class="font-bold text-red-600">${t.safe_until}</span></div>
+                  </div>
+
+                  ${actionFormHtml}
+                </div>`;
+            })
+            .join("");
+        }
+      }
     })
     .catch(() => {});
 }

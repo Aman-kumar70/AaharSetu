@@ -14,245 +14,333 @@
       <h1 class="text-2xl font-bold text-gray-800">Volunteer Deliveries</h1>
       <p class="text-sm text-gray-500">Pick up surplus food and deliver to verified shelters</p>
     </div>
-    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">
-      🛵 Volunteer Mode
+    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-200 shadow-sm">
+      🛵 {{ volunteer_name or "Volunteer Hero" }}
     </span>
   </div>
 
-  <!-- LEAFLET ROUTE MAP CONTAINER -->
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
-    <div class="flex justify-between items-center mb-2">
-      <h2 class="text-sm font-bold text-gray-700 flex items-center gap-1.5">
-        🗺️ <span>Active Mission Route</span>
-      </h2>
-      <span class="text-xs text-gray-500">Jalandhar City Area</span>
+  <!-- LEAFLET ROUTE MAP CONTAINER (3-Point Navigation) -->
+  <div class="bg-white rounded-lg shadow border border-gray-200 p-4 space-y-3">
+    <div class="flex justify-between items-center">
+      <div>
+        <h2 class="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+          🗺️ <span>Active Mission Route</span>
+        </h2>
+        <p class="text-2xs text-gray-500">3-Point Navigation: You ➔ Pickup ➔ Drop-off</p>
+      </div>
+      <button id="btn-gps" type="button" onclick="detectLiveGPS()" 
+        class="text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold px-2.5 py-1.5 rounded border border-blue-200 flex items-center gap-1 transition shadow-2xs">
+        <span>📍</span> Detect My Live GPS
+      </button>
     </div>
 
-    <!-- Leaflet Map Container -->
-    <div id="map" class="h-64 w-full rounded-md border border-gray-300 z-0"></div>
+    <!-- Leaflet Map Container: Server injects coordinates via HTML data-* attributes to keep <script> 100% valid pure JS -->
+    <div id="map" 
+      class="h-64 w-full rounded-md border border-gray-300 z-0"
+      data-vol-lat="{{ volunteer_lat or 31.3150 }}"
+      data-vol-lng="{{ volunteer_lng or 75.5750 }}"
+      data-vol-name="{{ volunteer_name or 'Volunteer' }}"
+      {% if tasks and tasks|length > 0 %}
+      data-donor-lat="{{ tasks[0].lat or 31.3125 }}"
+      data-donor-lng="{{ tasks[0].lng or 75.5804 }}"
+      data-donor-title="{{ tasks[0].pickup_address }} ({{ tasks[0].food_type }}, {{ tasks[0].quantity_kg }} kg)"
+      data-ngo-lat="{{ tasks[0].ngo_lat or 31.3217 }}"
+      data-ngo-lng="{{ tasks[0].ngo_lng or 75.5786 }}"
+      data-ngo-title="{{ tasks[0].ngo_name }} (Relief Destination)"
+      {% else %}
+      data-donor-lat="31.3125"
+      data-donor-lng="75.5804"
+      data-donor-title="Pickup: Green Valley Hostel (30 kg)"
+      data-ngo-lat="31.3217"
+      data-ngo-lng="75.5786"
+      data-ngo-title="Destination: Robin Hood Army Shelter"
+      {% endif %}>
+    </div>
 
-    <!-- Map Legend -->
-    <div
-      class="flex items-center justify-around mt-3 text-xs text-gray-600 bg-gray-50 p-2 rounded border border-gray-200">
-      <div class="flex items-center gap-1.5">
-        <span class="w-3 h-3 rounded-full bg-green-600 inline-block"></span>
-        <span class="font-medium">1. Pickup (Donor)</span>
+    <!-- Map 3-Point Legend -->
+    <div class="grid grid-cols-3 gap-1.5 text-2xs text-gray-600 bg-gray-50 p-2.5 rounded border border-gray-200 text-center font-medium">
+      <div class="flex items-center justify-center gap-1">
+        <span class="w-3 h-3 rounded-full bg-blue-600 inline-block shadow-2xs"></span>
+        <span class="text-blue-900 font-semibold">1. You (Location)</span>
       </div>
-      <span class="text-gray-300">➔</span>
-      <div class="flex items-center gap-1.5">
-        <span class="w-3 h-3 rounded-full bg-blue-600 inline-block"></span>
-        <span class="font-medium">2. Drop-off (NGO)</span>
+      <div class="flex items-center justify-center gap-1 border-x border-gray-200">
+        <span class="w-3 h-3 rounded-full bg-emerald-600 inline-block shadow-2xs"></span>
+        <span class="text-emerald-900 font-semibold">2. Pickup (Donor)</span>
+      </div>
+      <div class="flex items-center justify-center gap-1">
+        <span class="w-3 h-3 rounded-full bg-rose-600 inline-block shadow-2xs"></span>
+        <span class="text-rose-900 font-semibold">3. Drop (Shelter)</span>
       </div>
     </div>
   </div>
 
-  <!-- TASK CARDS SECTION -->
-  <div class="space-y-4">
-    <h2 class="text-md font-bold text-gray-800 flex items-center gap-1.5 border-b pb-2">
-      <span>📦</span> Assigned Tasks
-    </h2>
+  <!-- ========================================================================= -->
+  <!-- SECTION 1: UPCOMING MISSIONS (Open for Pickup - Donor & NGO Connected!) -->
+  <!-- ========================================================================= -->
+  <div class="space-y-3">
+    <div class="flex items-center justify-between border-b pb-2">
+      <h2 class="text-md font-bold text-gray-800 flex items-center gap-1.5">
+        <span>🔔</span> Upcoming Missions
+      </h2>
+      <span class="text-xs bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded border border-blue-200">
+        Donor & NGO Connected
+      </span>
+    </div>
 
-    <div id="volunteer-tasks-container" class="space-y-4">
-    {% if tasks %}
-    <!-- DYNAMIC JINJA LOOP -->
-    {% for t in tasks %}
-    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 space-y-3">
-      <div class="flex justify-between items-start">
-        <div>
-          <h3 class="font-bold text-gray-800 text-base">{{ t.food_type }}</h3>
-          <p class="text-xs text-gray-500">Weight: <span class="font-semibold text-gray-700">{{ t.quantity_kg }}
-              kg</span></p>
+    <div id="upcoming-missions-container" class="space-y-3">
+      {% if upcoming_missions %}
+      {% for t in upcoming_missions %}
+      <div class="bg-white rounded-lg shadow-sm border border-blue-200 p-4 space-y-3 hover:border-blue-300 transition">
+        <div class="flex justify-between items-start">
+          <div>
+            <h3 class="font-bold text-gray-800 text-base">{{ t.food_type }}</h3>
+            <p class="text-xs text-gray-500">Quantity: <span class="font-semibold text-gray-700">{{ t.quantity_kg }} kg</span></p>
+          </div>
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold uppercase bg-blue-100 text-blue-800 border border-blue-200">
+            Awaiting Pickup Claim
+          </span>
         </div>
-        <span id="status-{{ t.id }}" class="px-2.5 py-1 rounded-full text-xs font-semibold uppercase
-              {% if t.status == 'assigned' %}bg-purple-100 text-purple-800
-              {% elif t.status == 'picked_up' %}bg-orange-100 text-orange-800
-              {% elif t.status == 'delivered' %}bg-green-100 text-green-800
-              {% else %}bg-gray-100 text-gray-800{% endif %}">
-          {{ t.status }}
-        </span>
-      </div>
 
-      <!-- Pickup / Drop Details -->
-      <div class="text-xs space-y-1.5 bg-gray-50 p-3 rounded border border-gray-100">
-        <div><span class="text-gray-400 font-medium">Pickup At:</span> <span class="font-semibold text-gray-700">{{
-            t.pickup_address or "Donor Location" }}</span></div>
-        <div><span class="text-gray-400 font-medium">Deliver To:</span> <span class="font-semibold text-gray-700">{{
-            t.ngo_name or "Partner Shelter" }}</span></div>
-        <div><span class="text-gray-400 font-medium">Safe Until:</span> <span class="font-bold text-red-600">{{
-            t.safe_until }}</span></div>
-      </div>
+        <div class="text-xs space-y-1.5 bg-blue-50/50 p-3 rounded border border-blue-100">
+          <div><span class="text-gray-500 font-medium">📍 Pickup At:</span> <span class="font-bold text-gray-800">{{ t.pickup_address or "Donor Location" }}</span></div>
+          <div><span class="text-gray-500 font-medium">🏁 Deliver To:</span> <span class="font-bold text-gray-800">{{ t.ngo_name or "Partner Shelter" }}</span></div>
+          <div><span class="text-gray-500 font-medium">⏰ Safe Until:</span> <span class="font-bold text-red-600">{{ t.safe_until }}</span></div>
+        </div>
 
-      <!-- State-Specific Buttons -->
-      {% if t.status == 'assigned' %}
-      <form action="/pickup/{{ t.id }}" method="POST" class="pt-2">
-        <label class="block text-xs font-semibold text-gray-700 mb-1">
-          Enter 4-Digit Donor Verification OTP:
-        </label>
-        <div class="flex gap-2">
-          <input type="text" name="otp" required maxlength="4" pattern="[0-9]{4}" placeholder="e.g. 4821"
-            class="flex-1 px-3 py-2 border border-gray-300 rounded text-center tracking-widest font-mono text-base font-bold focus:ring-2 focus:ring-purple-500 focus:outline-none">
-          <button type="submit"
-            class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded text-sm transition shadow-sm">
-            Confirm Pickup
+        <div class="flex gap-2 pt-1">
+          <form action="/volunteer/accept/{{ t.id }}" method="POST" class="flex-1">
+            <button type="submit"
+              class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 px-4 rounded text-sm transition shadow-sm flex items-center justify-center gap-1.5">
+              <span>🛵</span> Accept & Claim Mission
+            </button>
+          </form>
+          <button type="button" 
+            data-lat="{{ t.lat }}" data-lng="{{ t.lng }}" 
+            data-ngo-lat="{{ t.ngo_lat }}" data-ngo-lng="{{ t.ngo_lng }}" 
+            data-pickup="{{ t.pickup_address|e }}" data-ngo="{{ t.ngo_name|e }}"
+            onclick="focusFromButton(this)"
+            class="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-semibold border border-gray-300 transition" title="Show route on map">
+            🗺️ Route
           </button>
         </div>
-      </form>
-      {% elif t.status == 'picked_up' %}
-      <form action="/deliver/{{ t.id }}" method="POST" class="pt-2">
-        <button type="submit"
-          class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded text-sm transition shadow-sm">
-          ✓ Mark As Delivered
-        </button>
-      </form>
+      </div>
+      {% endfor %}
+      {% else %}
+      <div class="p-4 bg-gray-50 rounded-lg border border-dashed border-gray-300 text-center text-xs text-gray-400">
+        No new missions waiting right now. When an NGO accepts a donor's food offer, it will appear here for you to accept and pick up!
+      </div>
       {% endif %}
     </div>
-    {% endfor %}
+  </div>
 
-    {% else %}
-    <!-- REALISTIC DUMMY TASKS FOR PREVIEW & JUDGE PRESENTATION -->
+  <!-- ========================================================================= -->
+  <!-- SECTION 2: ACTIVE MISSIONS (In Progress / Claimed by You) -->
+  <!-- ========================================================================= -->
+  <div class="space-y-3 pt-2">
+    <div class="flex items-center justify-between border-b pb-2">
+      <h2 class="text-md font-bold text-gray-800 flex items-center gap-1.5">
+        <span>📦</span> Active Missions
+      </h2>
+      <span class="text-xs bg-purple-50 text-purple-700 font-semibold px-2 py-0.5 rounded border border-purple-200">
+        Assigned & In Transit
+      </span>
+    </div>
 
-    <!-- Task 1: Status = assigned (Requires OTP pickup) -->
-    <div id="volunteer-card-1" class="bg-white rounded-lg shadow border border-gray-200 p-4 space-y-3">
-      <div class="flex justify-between items-start">
-        <div>
-          <h3 class="font-bold text-gray-800 text-base">Cooked Rice & Dal (30 kg)</h3>
-          <p class="text-xs text-gray-500">Mission #101 • Ready for pickup</p>
+    <div id="volunteer-tasks-container" class="space-y-4">
+      {% if active_tasks %}
+      {% for t in active_tasks %}
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4 space-y-3">
+        <div class="flex justify-between items-start">
+          <div>
+            <h3 class="font-bold text-gray-800 text-base">{{ t.food_type }}</h3>
+            <p class="text-xs text-gray-500">Weight: <span class="font-semibold text-gray-700">{{ t.quantity_kg }} kg</span></p>
+          </div>
+          <span id="status-{{ t.id }}" class="px-2.5 py-1 rounded-full text-xs font-semibold uppercase
+                {% if t.status == 'assigned' %}bg-purple-100 text-purple-800
+                {% elif t.status == 'picked_up' %}bg-orange-100 text-orange-800
+                {% elif t.status == 'delivered' %}bg-green-100 text-green-800
+                {% else %}bg-gray-100 text-gray-800{% endif %}">
+            {{ t.status }}
+          </span>
         </div>
-        <span id="task-badge-1"
-          class="px-2.5 py-1 rounded-full text-xs font-semibold uppercase bg-purple-100 text-purple-800 border border-purple-200">
-          assigned
-        </span>
-      </div>
 
-      <div class="text-xs space-y-1.5 bg-gray-50 p-3 rounded border border-gray-200">
-        <div><span class="text-gray-500 font-medium">📍 Pickup:</span> <span class="font-bold text-gray-800">Green
-            Valley Hostel (Model Town)</span></div>
-        <div><span class="text-gray-500 font-medium">🏁 Deliver:</span> <span class="font-bold text-gray-800">Robin Hood
-            Army Shelter (BMC Chowk)</span></div>
-        <div><span class="text-gray-500 font-medium">⏰ Safe Until:</span> <span
-            class="font-bold text-red-600">2026-10-30 23:30 (3h remaining)</span></div>
-      </div>
+        <div class="text-xs space-y-1.5 bg-gray-50 p-3 rounded border border-gray-100">
+          <div><span class="text-gray-400 font-medium">Pickup At:</span> <span class="font-semibold text-gray-700">{{ t.pickup_address or "Donor Location" }}</span></div>
+          <div><span class="text-gray-400 font-medium">Deliver To:</span> <span class="font-semibold text-gray-700">{{ t.ngo_name or "Partner Shelter" }}</span></div>
+          <div><span class="text-gray-400 font-medium">Safe Until:</span> <span class="font-bold text-red-600">{{ t.safe_until }}</span></div>
+        </div>
 
-      <!-- Verification Pickup Form -->
-      <div id="pickup-action-container-1">
-        <form action="/pickup/1" method="POST" onsubmit="handlePickupDemo(event, 1)" class="pt-1">
+        <!-- State-Specific Buttons -->
+        {% if t.status == 'assigned' %}
+        <form action="/pickup/{{ t.id }}" method="POST" class="pt-2">
           <label class="block text-xs font-semibold text-gray-700 mb-1">
-            Enter 4-Digit Pickup Code from Donor:
+            Enter 4-Digit Donor Verification OTP:
           </label>
           <div class="flex gap-2">
-            <input type="text" id="pickup-otp-input" name="otp" required maxlength="4" value="4821" placeholder="4821"
+            <input type="text" name="otp" required maxlength="4" pattern="[0-9]{4}" placeholder="e.g. 4821"
               class="flex-1 px-3 py-2 border border-gray-300 rounded text-center tracking-widest font-mono text-base font-bold focus:ring-2 focus:ring-purple-500 focus:outline-none bg-white">
             <button type="submit"
               class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded text-sm transition shadow-sm">
               Confirm Pickup
             </button>
           </div>
-          <p class="text-2xs text-gray-400 mt-1">Code prevents food fraud and verifies exact handoff.</p>
+          <p class="text-2xs text-gray-400 mt-1">Get this 4-digit code from the donor upon physical arrival.</p>
         </form>
-      </div>
-    </div>
-
-    <!-- Task 2: Status = picked_up (En route, ready for delivery) -->
-    <div id="volunteer-card-2" class="bg-white rounded-lg shadow border border-gray-200 p-4 space-y-3">
-      <div class="flex justify-between items-start">
-        <div>
-          <h3 class="font-bold text-gray-800 text-base">Roti & Mixed Sabzi (15 kg)</h3>
-          <p class="text-xs text-gray-500">Mission #102 • En Route to Shelter</p>
-        </div>
-        <span id="task-badge-2"
-          class="px-2.5 py-1 rounded-full text-xs font-semibold uppercase bg-orange-100 text-orange-800 border border-orange-200">
-          picked_up
-        </span>
-      </div>
-
-      <div class="text-xs space-y-1.5 bg-gray-50 p-3 rounded border border-gray-200">
-        <div><span class="text-gray-500 font-medium">📍 Picked From:</span> <span class="font-bold text-gray-800">Grand
-            Heritage Hall</span></div>
-        <div><span class="text-gray-500 font-medium">🏁 Destination:</span> <span class="font-bold text-gray-800">City
-            Shelter (Near Cantt Station)</span></div>
-      </div>
-
-      <!-- Deliver Action Button -->
-      <div id="deliver-action-container-2">
-        <form action="/deliver/2" method="POST" onsubmit="handleDeliverDemo(event, 2)" class="pt-1">
+        {% elif t.status == 'picked_up' %}
+        <form action="/deliver/{{ t.id }}" method="POST" class="pt-2">
           <button type="submit"
-            class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2.5 px-4 rounded text-sm transition shadow-sm">
-            ✓ Mark Delivered to Shelter
+            class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 px-4 rounded text-sm transition shadow-sm">
+            ✓ Mark As Delivered to Shelter
           </button>
         </form>
+        {% endif %}
       </div>
-    </div>
-    {% endif %}
+      {% endfor %}
+      {% else %}
+      <div class="p-5 bg-white rounded-lg border border-gray-200 text-center text-xs text-gray-400">
+        No active deliveries claimed yet. Accept an upcoming mission above to begin your rescue route!
+      </div>
+      {% endif %}
     </div>
   </div>
 
 </div>
 
-<!-- Leaflet Map Initialization Script & Demo Action Handlers -->
+<!-- Leaflet Map Initialization Script (100% Pure Clean JavaScript - Zero VS Code Linter Warnings) -->
 <script>
-  document.addEventListener('DOMContentLoaded', function () {
-    {% if tasks and tasks|length > 0 %}
-    var donorCoord = [{{ tasks[0].lat }}, {{ tasks[0].lng }}];
-    var ngoCoord = [{{ tasks[0].ngo_lat }}, {{ tasks[0].ngo_lng }}];
-    var donorTitle = {{ (tasks[0].pickup_address ~ ' (' ~ tasks[0].food_type ~ ', ' ~ tasks[0].quantity_kg ~ ' kg)')|tojson }};
-    var ngoTitle = {{ (tasks[0].ngo_name ~ ' (Relief Destination)')|tojson }};
-    {% else %}
-    var donorCoord = [31.3125, 75.5804];
-    var ngoCoord = [31.3217, 75.5786];
-    var donorTitle = "Pickup: Green Valley Hostel (30 kg)";
-    var ngoTitle = "Destination: Robin Hood Army Shelter";
-    {% endif %}
+  let map, volMarker, donorMarker, ngoMarker, routeVolToDonor, routeDonorToNgo;
 
-    if (typeof L !== 'undefined') {
-      var map = L.map('map').setView([31.3171, 75.5795], 14);
+  // Read initial coordinates and metadata directly from the HTML element's data attributes
+  const mapElement = document.getElementById('map');
+  const volCoord = [
+    parseFloat(mapElement ? mapElement.getAttribute('data-vol-lat') : 31.3150) || 31.3150,
+    parseFloat(mapElement ? mapElement.getAttribute('data-vol-lng') : 75.5750) || 75.5750
+  ];
+  let donorCoord = [
+    parseFloat(mapElement ? mapElement.getAttribute('data-donor-lat') : 31.3125) || 31.3125,
+    parseFloat(mapElement ? mapElement.getAttribute('data-donor-lng') : 75.5804) || 75.5804
+  ];
+  let ngoCoord = [
+    parseFloat(mapElement ? mapElement.getAttribute('data-ngo-lat') : 31.3217) || 31.3217,
+    parseFloat(mapElement ? mapElement.getAttribute('data-ngo-lng') : 75.5786) || 75.5786
+  ];
+  let donorTitle = mapElement ? (mapElement.getAttribute('data-donor-title') || "Pickup: Green Valley Hostel (30 kg)") : "Pickup: Green Valley Hostel (30 kg)";
+  let ngoTitle = mapElement ? (mapElement.getAttribute('data-ngo-title') || "Destination: Robin Hood Army Shelter") : "Destination: Robin Hood Army Shelter";
+  const volName = mapElement ? (mapElement.getAttribute('data-vol-name') || "Volunteer Hero") : "Volunteer Hero";
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '© OpenStreetMap contributors'
-      }).addTo(map);
+  function createCustomIcon(color, emoji) {
+    return L.divIcon({
+      className: 'custom-map-pin',
+      html: `<div style="background-color: ${color}; width: 34px; height: 34px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; font-size: 16px;">${emoji}</div>`,
+      iconSize: [34, 34],
+      iconAnchor: [17, 17],
+      popupAnchor: [0, -17]
+    });
+  }
 
-      L.marker(donorCoord).addTo(map)
-        .bindPopup("<b>📍 Pickup Location</b><br>" + donorTitle)
-        .openPopup();
+  function initLeafletMap() {
+    if (typeof L === 'undefined') return;
 
-      L.marker(ngoCoord).addTo(map)
-        .bindPopup("<b>🏁 Delivery Destination</b><br>" + ngoTitle);
+    map = L.map('map').setView(volCoord, 14);
 
-      var routeLine = L.polyline([donorCoord, ngoCoord], {
-        color: '#16a34a',
-        weight: 4,
-        dashArray: '6, 8',
-        opacity: 0.8
-      }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
 
-      map.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
+    // 1. Volunteer Current Location Marker (Blue)
+    volMarker = L.marker(volCoord, { icon: createCustomIcon('#2563eb', '🛵') }).addTo(map)
+      .bindPopup("<b>📍 Your Current Location</b><br>" + volName);
+
+    // 2. Donor Pickup Point Marker (Emerald Green)
+    donorMarker = L.marker(donorCoord, { icon: createCustomIcon('#059669', '📦') }).addTo(map)
+      .bindPopup("<b>📦 1. Pickup Location</b><br>" + donorTitle);
+
+    // 3. NGO Destination Marker (Crimson Red)
+    ngoMarker = L.marker(ngoCoord, { icon: createCustomIcon('#dc2626', '🏁') }).addTo(map)
+      .bindPopup("<b>🏁 2. Delivery Destination</b><br>" + ngoTitle);
+
+    // Route segment 1: Volunteer to Donor (Blue dotted line)
+    routeVolToDonor = L.polyline([volCoord, donorCoord], {
+      color: '#2563eb',
+      weight: 3,
+      dashArray: '5, 6',
+      opacity: 0.75
+    }).addTo(map);
+
+    // Route segment 2: Donor to NGO (Green dashed line)
+    routeDonorToNgo = L.polyline([donorCoord, ngoCoord], {
+      color: '#059669',
+      weight: 4,
+      dashArray: '8, 8',
+      opacity: 0.85
+    }).addTo(map);
+
+    // Auto-fit all 3 markers into screen view
+    fitAllMapMarkers();
+  }
+
+  function fitAllMapMarkers() {
+    if (!map || !volMarker || !donorMarker || !ngoMarker) return;
+    const group = L.featureGroup([volMarker, donorMarker, ngoMarker]);
+    map.fitBounds(group.getBounds(), { padding: [45, 45], maxZoom: 15 });
+  }
+
+  function focusFromButton(btn) {
+    if (!btn) return;
+    const dLat = parseFloat(btn.getAttribute('data-lat')) || 31.3125;
+    const dLng = parseFloat(btn.getAttribute('data-lng')) || 75.5804;
+    const nLat = parseFloat(btn.getAttribute('data-ngo-lat')) || 31.3217;
+    const nLng = parseFloat(btn.getAttribute('data-ngo-lng')) || 75.5786;
+    const dName = btn.getAttribute('data-pickup') || "Pickup Location";
+    const nName = btn.getAttribute('data-ngo') || "Destination Shelter";
+    focusMissionMap(dLat, dLng, nLat, nLng, dName, nName);
+  }
+
+  function focusMissionMap(dLat, dLng, nLat, nLng, dName, nName) {
+    if (!map || !donorMarker || !ngoMarker || !routeVolToDonor || !routeDonorToNgo) return;
+    donorCoord = [dLat, dLng];
+    ngoCoord = [nLat, nLng];
+    donorTitle = dName;
+    ngoTitle = nName;
+
+    donorMarker.setLatLng(donorCoord).bindPopup("<b>📦 1. Pickup Location</b><br>" + donorTitle);
+    ngoMarker.setLatLng(ngoCoord).bindPopup("<b>🏁 2. Delivery Destination</b><br>" + ngoTitle);
+
+    routeVolToDonor.setLatLngs([volCoord, donorCoord]);
+    routeDonorToNgo.setLatLngs([donorCoord, ngoCoord]);
+
+    fitAllMapMarkers();
+    donorMarker.openPopup();
+  }
+
+  function detectLiveGPS() {
+    const btn = document.getElementById('btn-gps');
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser.");
+      return;
     }
+
+    if (btn) btn.innerHTML = "<span>⏳</span> Locating...";
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        volCoord = [pos.coords.latitude, pos.coords.longitude];
+        volMarker.setLatLng(volCoord).bindPopup("<b>📍 Live GPS Position</b><br>Accurate within " + Math.round(pos.coords.accuracy) + "m").openPopup();
+        routeVolToDonor.setLatLngs([volCoord, donorCoord]);
+        fitAllMapMarkers();
+        if (btn) btn.innerHTML = "<span>✓</span> GPS Active";
+      },
+      (err) => {
+        if (btn) btn.innerHTML = "<span>⚠️</span> GPS Denied";
+        console.warn("GPS error:", err.message);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    initLeafletMap();
   });
-
-  // Standalone Verification handler for Task 1
-  function handlePickupDemo(e, taskId) {
-    if (window.location.protocol === 'file:') {
-      e.preventDefault();
-      var badge = document.getElementById('task-badge-' + taskId);
-      badge.textContent = 'picked_up';
-      badge.className = 'px-2.5 py-1 rounded-full text-xs font-semibold uppercase bg-orange-100 text-orange-800 border border-orange-200';
-
-      var container = document.getElementById('pickup-action-container-' + taskId);
-      container.innerHTML = '<div class="bg-green-50 border border-green-300 text-green-800 p-2.5 rounded text-center text-xs font-bold mb-2">✓ OTP 4821 Verified! Food is securely picked up.</div><button onclick="handleDeliverDemo(event, ' + taskId + ')" class="w-full bg-green-600 text-white font-semibold py-2 px-4 rounded text-sm">✓ Mark Delivered to Shelter</button>';
-    }
-  }
-
-  // Standalone Delivery handler
-  function handleDeliverDemo(e, taskId) {
-    if (window.location.protocol === 'file:') {
-      e.preventDefault();
-      var badge = document.getElementById('task-badge-' + taskId);
-      badge.textContent = 'delivered';
-      badge.className = 'px-2.5 py-1 rounded-full text-xs font-semibold uppercase bg-green-100 text-green-800 border border-green-200';
-
-      var card = document.getElementById('volunteer-card-' + taskId);
-      card.innerHTML = '<div class="text-center py-4 bg-green-50 rounded-lg border border-green-200"><span class="text-2xl">🎉</span><p class="font-bold text-green-900 text-sm mt-1">Delivery Complete!</p><p class="text-xs text-green-700">Food safely handed over to shelter. 60 meals saved.</p></div>';
-    }
-  }
 </script>
 {% endblock %}

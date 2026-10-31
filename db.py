@@ -215,6 +215,22 @@ def seed_data(conn=None):
             t_minus_1h
         ),
         (
+            user_map.get("NITJ Boys Hostel 7 Mess"),
+            "Fresh Paneer Curry & Rotis",
+            20.0,
+            t_minus_1h,
+            t_plus_5h,
+            t_pickup_start,
+            t_pickup_end,
+            31.3959,
+            75.5358,
+            "accepted",
+            "5319",
+            user_map.get("Seva Kitchen NGO"),
+            None,
+            t_minus_1h
+        ),
+        (
             user_map.get("Haveli Heritage Restaurant"),
             "Lunch Snacks & Sandwiches",
             25.0,
